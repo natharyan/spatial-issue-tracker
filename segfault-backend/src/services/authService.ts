@@ -2,7 +2,7 @@ import { GOOGLE_OAUTH, JWT } from "../appconfig";
 import jwt from "jsonwebtoken";
 import { redisClient } from "../data/redisClient";
 import { getUserByEmail, createNewUser } from "../data/user";
-import { UserRole } from "../data/src/generated/prisma/enums";
+import { UserRole } from "../generated/prisma/enums";
 
 async function postTokenRequest(body: URLSearchParams) {
 	const tokenUrl = "https://oauth2.googleapis.com/token";

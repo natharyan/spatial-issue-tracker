@@ -1,7 +1,7 @@
 // Database access for user related operations
 import { prisma } from "./prisma/prismaClient";
-import { UserRole } from "./src/generated/prisma/enums";
-import type { User } from "./src/generated/prisma/client";
+import { UserRole } from "../generated/prisma/enums";
+// import type { User } from "./src/generated/prisma/client";
 
 // Pass in the hashed password. Must define a role. Dont use this for a guest- skip login entirely
 export async function createNewUser(email: string, password: string, name: string | null, role: UserRole,) {

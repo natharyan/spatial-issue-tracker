@@ -1,6 +1,6 @@
 // Notification DB helpers
 import { prisma } from "./prisma/prismaClient";
-import { NotificationType } from "./src/generated/prisma/enums";
+import { NotificationType } from "../generated/prisma/enums";
 
 export async function createNotification(userId: number, type: NotificationType, message: string) {
   const notif = await prisma.notification.create({ data: { userId, type, message } });

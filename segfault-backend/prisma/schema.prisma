@@ -1,0 +1,215 @@
+generator client {
+  provider = "prisma-client"
+  binaryTargets = ["native", "windows", "darwin-arm64"]
+  output   = "../src/generated/prisma"
+}
+
+datasource db {
+  provider  = "postgresql"
+  url  	    = env("DATABASE_URL")
+}
+
+// Primary user stuff
+enum UserRole {
+  USER
+  ADMIN
+  GUEST
+  PIGS
+}
+
+model User {
+  id        Int       @id @default(autoincrement())
+  email     String    @unique
+  password  String
+  name      String?
+  createdAt DateTime  @default(now())
+
+  issues    Issue[]
+  comments Comment[]
+  commentUpvotes CommentUpvote[]
+  issueUpvotes IssueUpvote[]
+  resolutionVotes IssueResolutionVote[]
+
+  role     UserRole  @default(USER)
+  isBanned Boolean   @default(false)
+  banExpiresAt DateTime?
+  banReason  String?
+
+  credibility Int      @default(0)
+  badges UserBadge[]
+
+  notifications Notification[]
+}
+
+// Would this need an image?
+model UserBadge {
+  id        Int      @id @default(autoincrement())
+  name      String
+  awardedAt DateTime @default(now())
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+}
+
+// Support for guest- store this in local storage
+model GuestToken {
+  id        Int      @id @default(autoincrement())
+  token     String   @unique
+  createdAt DateTime @default(now())
+
+  issues    Issue[]
+}
+
+// Issue stuff
+
+model Issue {
+  id          Int          @id @default(autoincrement())
+  title       String
+  description String
+  latitude    Float
+  longitude   Float
+  status      IssueStatus  @default(PENDING)
+  authorized   IssueAuthorized @default(FALSE)
+  error       IssueError   @default(PENDING)
+  createdAt   DateTime     @default(now())
+
+  imageBlobId String?
+
+  userId      Int
+  user        User         @relation(fields: [userId], references: [id])
+  comments    Comment[]
+
+  guestTokenId Int?
+  guestToken   GuestToken? @relation(fields: [guestTokenId], references: [id])
+
+  upvotes     IssueUpvote[]
+  resolutionVotes IssueResolutionVote[]
+
+  issueType  IssueType
+
+  @@index([issueType])
+  @@index([userId])
+  @@index([latitude, longitude])
+}
+
+enum IssueStatus {
+  PENDING
+  IN_PROGRESS
+  RESOLVED
+}
+
+enum IssueAuthorized {
+  TRUE
+  FALSE
+}
+
+enum IssueError {
+  NONE
+  INVALID_LOCATION
+  INAPPROPRIATE_CONTENT
+  PENDING
+}
+
+model IssueUpvote {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+
+  issueId   Int
+  issue     Issue    @relation(fields: [issueId], references: [id])
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([issueId, userId])
+}
+
+// Each vote for an issue
+model IssueResolutionVote {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  isResolved Boolean
+
+  issueId   Int
+  issue     Issue @relation(fields: [issueId], references: [id])
+
+  userId    Int
+  user      User @relation(fields: [userId], references: [id])
+
+  @@unique([issueId, userId])
+}
+
+
+enum IssueType {
+  POTHOLE
+  ROAD_DAMAGE
+  STREETLIGHT_FAULT
+  GARBAGE_UNCOLLECTED
+  ILLEGAL_DUMPING
+  DRAINAGE_BLOCKED
+  SEWAGE_OVERFLOW
+  WATER_SUPPLY_ISSUE
+  LOW_WATER_PRESSURE
+  OPEN_MANHOLE
+  BROKEN_FOOTPATH
+  ILLEGAL_ENCROACHMENT
+  STRAY_CATTLE
+  TREE_FALL
+  TRAFFIC_LIGHT_FAULT
+  MOSQUITO_BREEDING
+  NOISE_COMPLAINT
+  BUILDING_SAFETY
+}
+
+
+
+model Comment {
+  id        Int      @id @default(autoincrement())
+  content   String
+  createdAt DateTime @default(now())
+
+  issueId   Int
+  issue     Issue    @relation(fields: [issueId], references: [id])
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+
+  upvotes   CommentUpvote[]
+
+  isFlagged Boolean @default(false)
+  flaggedReason String?
+}
+
+model CommentUpvote {
+  id        Int      @id @default(autoincrement())
+
+  commentId Int
+  comment   Comment  @relation(fields: [commentId], references: [id])
+
+  userId    Int
+  user      User     @relation(fields: [userId], references: [id])
+
+  createdAt DateTime @default(now())
+
+  @@unique([commentId, userId])
+}
+
+
+model Notification {
+  id        Int      @id @default(autoincrement())
+  type      NotificationType @default(GENERAL)
+  message   String
+  createdAt DateTime @default(now())
+  read      Boolean  @default(false)
+
+  userId    Int?
+  user      User?    @relation(fields: [userId], references: [id])
+}
+
+enum NotificationType {
+  ISSUE_STATUS_UPDATE
+  NEW_COMMENT
+  GENERAL
+  BAN_NOTICE
+  REMOVAL_NOTICE
+  UPVOTE_RECEIVED
+}

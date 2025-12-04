@@ -1,6 +1,6 @@
 // Database access for issue related operations
 import { prisma } from "./prisma/prismaClient";
-import { IssueStatus, IssueType, IssueAuthorized, IssueError } from "./src/generated/prisma/enums";
+import { IssueStatus, IssueType, IssueAuthorized, IssueError } from "../generated/prisma/enums";
 
 // Issue Creation and Management
 export async function createAuthenticatedIssue(
