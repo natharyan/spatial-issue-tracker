@@ -14,7 +14,8 @@ export async function handleGoogleCallback(req: Request, res: Response) {
 		const sevenDaysMs = 1000 * 60 * 60 * 24 * 7;
 		res.cookie('session', token, { httpOnly: true, maxAge: sevenDaysMs, sameSite: 'lax' });
 
-		return res.redirect(`${FRONTEND_URL}/dashboard`);
+		// Pass token to frontend for localStorage storage
+		return res.redirect(`${FRONTEND_URL}/auth/google/callback?token=${encodeURIComponent(token)}`);
 	} catch (err: any) {
 		console.error('Google OAuth callback failed', err);
 		return res.redirect(`${FRONTEND_URL}/login?error=${encodeURIComponent(err?.message ?? 'login_failed')}`);

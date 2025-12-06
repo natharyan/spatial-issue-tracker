@@ -26,7 +26,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        const decoded = jwt.verify(token, JWT.SECRET) as { sub?: string; id?: number; role?: string; guestTokenId?: number };
+        const decoded = jwt.verify(token, JWT.SECRET) as { sub?: string; id?: number; userId?: number; role?: string; guestTokenId?: number };
 
         if (decoded.guestTokenId) {
             const guestToken = await prisma.guestToken.findUnique({ where: { id: decoded.guestTokenId } });
@@ -39,7 +39,7 @@ export async function authMiddleware(req: Request, res: Response, next: NextFunc
                 guestTokenId: decoded.guestTokenId,
             };
         } else {
-            const userId = decoded.id || (decoded.sub ? parseInt(decoded.sub) : undefined);
+            const userId = decoded.userId || decoded.id || (decoded.sub ? parseInt(decoded.sub) : undefined);
             if (!userId) {
                 return res.status(401).json({ error: "Invalid token" });
             }
@@ -70,7 +70,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
             return next();
         }
 
-        const decoded = jwt.verify(token, JWT.SECRET) as { sub?: string; id?: number; role?: string; guestTokenId?: number };
+        const decoded = jwt.verify(token, JWT.SECRET) as { sub?: string; id?: number; userId?: number; role?: string; guestTokenId?: number };
 
         if (decoded.guestTokenId) {
             req.user = {
@@ -79,7 +79,7 @@ export async function optionalAuth(req: Request, _res: Response, next: NextFunct
                 guestTokenId: decoded.guestTokenId,
             };
         } else {
-            const userId = decoded.id || (decoded.sub ? parseInt(decoded.sub) : undefined);
+            const userId = decoded.userId || decoded.id || (decoded.sub ? parseInt(decoded.sub) : undefined);
             if (userId) {
                 const user = await prisma.user.findUnique({ where: { id: userId } });
                 if (user) {

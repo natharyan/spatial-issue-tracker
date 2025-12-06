@@ -10,7 +10,7 @@ const api = axios.create({
   },
 });
 
- 
+
 api.interceptors.request.use(
   (config) => {
     const token = localStorage.getItem('authToken');
@@ -24,12 +24,14 @@ api.interceptors.request.use(
   }
 );
 
- 
+
 api.interceptors.response.use(
   (response) => response,
   (error) => {
     if (error.response?.status === 401) {
       // Handle unauthorized - redirect to login or clear auth state
+      console.log('[Axios] 401 Unauthorized on:', error.config?.url);
+      console.log('[Axios] Current authToken:', localStorage.getItem('authToken')?.substring(0, 30) + '...');
       localStorage.removeItem('authToken');
       window.location.href = '/login';
     }
@@ -39,7 +41,7 @@ api.interceptors.response.use(
 
 export default api;
 
- 
+
 export const authAPI = {
   loginWithGoogle: async (code: string) => {
     const response = await api.post('/auth/google', { code });
@@ -51,13 +53,13 @@ export const authAPI = {
     return response.data;
   },
 
-  
+
   login: async (email: string, password: string) => {
     const response = await api.post('/auth/login', { email, password });
     return response.data;
   },
 
-  
+
   register: async (email: string, password: string, name?: string) => {
     const response = await api.post('/auth/register', { email, password, name });
     return response.data;

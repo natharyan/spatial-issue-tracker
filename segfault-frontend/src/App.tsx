@@ -5,6 +5,7 @@ import { AuthProvider } from './state/authContext';
 import Landing from './pages/Landing/Landing';
 import Login from './pages/Login/Login';
 import Dashboard from './pages/Dashboard/Dashboard';
+import AuthCallback from './pages/AuthCallback/AuthCallback';
 
 function App() {
   return (
@@ -18,7 +19,7 @@ function App() {
             <Route path="/register" element={<Login />} />
             <Route path="/forgot-password" element={<Login />} />
             <Route path="/dashboard" element={<Dashboard />} />
-            <Route path="/auth/google/callback" element={<div>Processing Google Login...</div>} />
+            <Route path="/auth/google/callback" element={<AuthCallback />} />
           </Routes>
         </Router>
       </AuthProvider>
