@@ -23,7 +23,7 @@ const config: runtime.GetPrismaClientConfig = {
       "value": "prisma-client"
     },
     "output": {
-      "value": "C:\\Github\\dpcs_2\\project-2-segfault2\\segfault-backend\\src\\data\\src\\generated\\prisma",
+      "value": "/Users/aryannath/Important/Semester 7/Design Practices in CS/Issue Tracker/project-2-segfault2/segfault-backend/src/data/src/generated/prisma",
       "fromEnvVar": null
     },
     "config": {
@@ -32,12 +32,12 @@ const config: runtime.GetPrismaClientConfig = {
     "binaryTargets": [
       {
         "fromEnvVar": null,
-        "value": "windows",
+        "value": "darwin-arm64",
         "native": true
       }
     ],
     "previewFeatures": [],
-    "sourceFilePath": "C:\\Github\\dpcs_2\\project-2-segfault2\\segfault-backend\\src\\data\\prisma\\schema.prisma",
+    "sourceFilePath": "/Users/aryannath/Important/Semester 7/Design Practices in CS/Issue Tracker/project-2-segfault2/segfault-backend/src/data/prisma/schema.prisma",
     "isCustomOutput": true
   },
   "relativePath": "../../../prisma",
@@ -47,6 +47,7 @@ const config: runtime.GetPrismaClientConfig = {
     "db"
   ],
   "activeProvider": "postgresql",
+  "postinstall": false,
   "inlineDatasources": {
     "db": {
       "url": {
