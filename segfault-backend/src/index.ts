@@ -12,7 +12,10 @@ const app = express();
 const port = 3000;
 
 const allowedOrigins = [FRONTEND_URL, "http://localhost:5173", "http://localhost:5174"];
-app.use(cors({ origin: allowedOrigins, credentials: true }));
+app.use(cors({
+  origin: true,
+  credentials: true
+}));
 app.use(cookieParser());
 app.use(express.json());
 
@@ -25,6 +28,7 @@ app.use("/issues", issueRoutes);
 app.use("/", commentRoutes);
 app.use("/notifications", notificationRoutes);
 
-app.listen(port, () => {
-  console.log(`Server running at http://localhost:${port}`);
+app.listen(port, "0.0.0.0", () => {
+  console.log(`Server running at http://0.0.0.0:${port}`);
 });
+

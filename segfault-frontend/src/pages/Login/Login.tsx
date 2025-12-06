@@ -55,9 +55,10 @@ const Login = () => {
 
   const handleGoogleLogin = () => {
     // Redirect to Google OAuth flow
-    // The backend will handle the OAuth exchange
+    // The backend will handle the OAuth callback and redirect back to frontend
     const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-    const redirectUri = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${window.location.origin}/auth/google/callback`;
+    const apiUrl = import.meta.env.VITE_API_URL || 'http://localhost:3000';
+    const redirectUri = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${apiUrl}/auth/callback`;
     const scope = 'openid email profile';
     
     const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;

@@ -67,20 +67,20 @@ export async function exchangeGoogleCodeForProfile(code: string) {
 
 	const idToken: string | undefined = tokenResp.id_token;
 	if (!idToken) {
-        throw new Error("No id_token returned from Google");
-    }
+		throw new Error("No id_token returned from Google");
+	}
 
 	const decoded: any = jwt.decode(idToken);
 	if (!decoded) {
-        throw new Error("Unable to decode id_token");
-    }
+		throw new Error("Unable to decode id_token");
+	}
 
 	const email = decoded.email as string | undefined;
 	const name = decoded.name as string | undefined;
 
 	if (!email) {
-        throw new Error("No email present in Google id_token");
-    }
+		throw new Error("No email present in Google id_token");
+	}
 
 	return { email, name: name ?? null };
 }
