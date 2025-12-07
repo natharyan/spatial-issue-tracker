@@ -50,12 +50,19 @@ $appExists = az containerapp show --name $ACA_APP_NAME --resource-group $RESOURC
 
 if (-not $appExists) {
     Write-Host "Creating Container App: $ACA_APP_NAME" -ForegroundColor Magenta
+    
+    # ACR credentials
+    $ACR_USERNAME = "SegfaultDockerImages"
+    $ACR_PASSWORD = "6F6FiaZTXiNeBUk72T1MPVbzyzWxEaeD/bEHO9tmyB+ACRARTYoH"
+    
     az containerapp create `
         --name $ACA_APP_NAME `
         --resource-group $RESOURCE_GROUP `
         --environment $ACA_ENV_NAME `
         --image "${ACR_ENDPOINT}/${IMAGE_NAME}:${IMAGE_TAG}" `
         --registry-server $ACR_ENDPOINT `
+        --registry-username $ACR_USERNAME `
+        --registry-password $ACR_PASSWORD `
         --target-port 3000 `
         --ingress external `
         --min-replicas 1 `
