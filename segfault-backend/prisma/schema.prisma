@@ -14,7 +14,7 @@ enum UserRole {
   USER
   ADMIN
   GUEST
-  PIGS
+  PIGS // Government officials (.gov.in emails)
 }
 
 model User {
@@ -22,6 +22,7 @@ model User {
   email     String    @unique
   password  String
   name      String?
+  picture   String?
   createdAt DateTime  @default(now())
 
   issues    Issue[]
@@ -72,6 +73,8 @@ model Issue {
   authorized   IssueAuthorized @default(FALSE)
   error       IssueError   @default(PENDING)
   createdAt   DateTime     @default(now())
+  updatedAt   DateTime     @default(now()) @updatedAt
+  severity    Int?
 
   imageBlobId String?
 
@@ -177,6 +180,7 @@ model Comment {
 
   isFlagged Boolean @default(false)
   flaggedReason String?
+  isSystemGenerated Boolean @default(false)
 }
 
 model CommentUpvote {
@@ -212,4 +216,31 @@ enum NotificationType {
   BAN_NOTICE
   REMOVAL_NOTICE
   UPVOTE_RECEIVED
+}
+
+// Road network graph for pathfinding
+model GraphNode {
+  id        String      @id @default(uuid())
+  osmId     String      @unique // OSM node ID as string to avoid BigInt serialization issues
+  latitude  Float
+  longitude Float
+  outgoing  GraphEdge[] @relation("StartNode")
+  incoming  GraphEdge[] @relation("EndNode")
+
+  @@index([latitude, longitude])
+}
+
+model GraphEdge {
+  id          String    @id @default(uuid())
+  startNodeId String
+  endNodeId   String
+  startNode   GraphNode @relation("StartNode", fields: [startNodeId], references: [id])
+  endNode     GraphNode @relation("EndNode", fields: [endNodeId], references: [id])
+
+  distance    Float     // In meters
+  baseCost    Float     // Usually same as distance
+  penalty     Float     @default(1.0) // Multiplier: 1.0 = normal, higher = avoid
+
+  @@index([startNodeId])
+  @@index([endNodeId])
 }

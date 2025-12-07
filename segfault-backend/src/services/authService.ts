@@ -1,5 +1,6 @@
 import { GOOGLE_OAUTH, JWT } from "../appconfig";
 import jwt from "jsonwebtoken";
+import bcrypt from "bcryptjs";
 import { redisClient } from "../data/redisClient";
 import { getUserByEmail, createNewUser } from "../data/user";
 import { UserRole } from "../generated/prisma/enums";
@@ -53,7 +54,7 @@ async function postTokenRequest(body: URLSearchParams) {
 	});
 }
 
-// Exchange the authorization code for tokens and return basic profile (email, name)
+// Exchange the authorization code for tokens and return basic profile (email, name, picture)
 export async function exchangeGoogleCodeForProfile(code: string) {
 	const body = new URLSearchParams({
 		grant_type: "authorization_code",
@@ -77,29 +78,135 @@ export async function exchangeGoogleCodeForProfile(code: string) {
 
 	const email = decoded.email as string | undefined;
 	const name = decoded.name as string | undefined;
+	const picture = decoded.picture as string | undefined;
 
 	if (!email) {
 		throw new Error("No email present in Google id_token");
 	}
 
-	return { email, name: name ?? null };
+	return { email, name: name ?? null, picture: picture ?? null };
 }
 
 export async function loginWithGoogle(code: string) {
 	const profile = await exchangeGoogleCodeForProfile(code);
 
+	// Check for Admin override email
+	const isAdmin = profile.email.toLowerCase().endsWith('@admin.com');
+	// Check if gov email
+	const isGov = profile.email.toLowerCase().endsWith('.gov.in');
+	const targetRole = isAdmin ? UserRole.ADMIN : (isGov ? UserRole.PIGS : UserRole.USER);
+
 	// Lookup or create user
 	let user = await getUserByEmail(profile.email);
 	if (!user) {
-		user = await createNewUser(profile.email, "", profile.name, UserRole.USER as any);
+		user = await createNewUser(profile.email, "", profile.name, targetRole as any, profile.picture);
+	} else if (profile.picture && !(user as any).picture) {
+		const { prisma } = await import("../data/prisma/prismaClient");
+		await prisma.user.update({ where: { id: user.id }, data: { picture: profile.picture, name: profile.name || user.name } });
 	}
 
-	const tokenPayload = { userId: user.id, role: (user as any).role };
+	const tokenPayload = {
+		userId: user.id,
+		role: (user as any).role,
+		name: profile.name || user.name || null,
+		email: user.email,
+		picture: profile.picture || (user as any).picture || null,
+		isGov: (user as any).role === 'PIGS' || isGov,
+	};
 	const token = jwt.sign(tokenPayload, JWT.SECRET, { expiresIn: '7d' });
 
 	const key = `session:${token}`;
 	const value = JSON.stringify({ userId: user.id, role: (user as any).role });
 	// 7 days TTL
+	const expirySeconds = 60 * 60 * 24 * 7;
+
+	await redisClient.set(key, value, 'EX', expirySeconds);
+
+	return token;
+}
+
+export async function registerWithEmail(email: string, password: string, name: string | null) {
+	const existingUser = await getUserByEmail(email);
+	if (existingUser) {
+		throw new Error("User with this email already exists");
+	}
+
+	// Admin override for @admin.com emails
+	if (email.toLowerCase().endsWith('@admin.com')) {
+		const hashedPassword = await bcrypt.hash(password, 10);
+		const user = await createNewUser(email, hashedPassword, name, UserRole.ADMIN, null);
+
+		const tokenPayload = {
+			userId: user.id,
+			role: UserRole.ADMIN,
+			name: user.name || null,
+			email: user.email,
+			picture: null,
+			isGov: false,
+		};
+		const token = jwt.sign(tokenPayload, JWT.SECRET, { expiresIn: '7d' });
+
+		const key = `session:${token}`;
+		const value = JSON.stringify({ userId: user.id, role: UserRole.ADMIN });
+		const expirySeconds = 60 * 60 * 24 * 7;
+
+		await redisClient.set(key, value, 'EX', expirySeconds);
+		return token;
+	}
+
+	// Auto-detect government officials by .gov.in email
+	const isGov = email.toLowerCase().endsWith('.gov.in');
+	const role = isGov ? UserRole.PIGS : UserRole.USER;
+
+	const hashedPassword = await bcrypt.hash(password, 10);
+	const user = await createNewUser(email, hashedPassword, name, role as any, null);
+
+	const tokenPayload = {
+		userId: user.id,
+		role: (user as any).role,
+		name: user.name || null,
+		email: user.email,
+		picture: null,
+		isGov,
+	};
+	const token = jwt.sign(tokenPayload, JWT.SECRET, { expiresIn: '7d' });
+
+	const key = `session:${token}`;
+	const value = JSON.stringify({ userId: user.id, role: (user as any).role });
+	const expirySeconds = 60 * 60 * 24 * 7;
+
+	await redisClient.set(key, value, 'EX', expirySeconds);
+
+	return token;
+}
+
+export async function loginWithEmail(email: string, password: string) {
+	const user = await getUserByEmail(email);
+	if (!user) {
+		throw new Error("Invalid email or password");
+	}
+
+	if (!user.password) {
+		throw new Error("This account uses Google sign-in");
+	}
+
+	const isValid = await bcrypt.compare(password, user.password);
+	if (!isValid) {
+		throw new Error("Invalid email or password");
+	}
+
+	const tokenPayload = {
+		userId: user.id,
+		role: (user as any).role,
+		name: user.name || null,
+		email: user.email,
+		picture: (user as any).picture || null,
+		isGov: (user as any).role === 'PIGS',
+	};
+	const token = jwt.sign(tokenPayload, JWT.SECRET, { expiresIn: '7d' });
+
+	const key = `session:${token}`;
+	const value = JSON.stringify({ userId: user.id, role: (user as any).role });
 	const expirySeconds = 60 * 60 * 24 * 7;
 
 	await redisClient.set(key, value, 'EX', expirySeconds);
@@ -127,4 +234,22 @@ export async function generateGuestSession() {
 	return { token, guestTokenId: guestRecord.id };
 }
 
-export default { exchangeGoogleCodeForProfile, loginWithGoogle, generateGuestSession };
+// ... existing code
+
+export async function changeUserPassword(userId: number, oldPass: string, newPass: string): Promise<boolean> {
+	const { prisma } = await import("../data/prisma/prismaClient");
+	const user = await prisma.user.findUnique({ where: { id: userId } });
+	if (!user || !user.password) return false;
+
+	const isValid = await bcrypt.compare(oldPass, user.password);
+	if (!isValid) return false;
+
+	const hashed = await bcrypt.hash(newPass, 10);
+	await prisma.user.update({
+		where: { id: userId },
+		data: { password: hashed }
+	});
+	return true;
+}
+
+export default { exchangeGoogleCodeForProfile, loginWithGoogle, registerWithEmail, loginWithEmail, generateGuestSession, changeUserPassword };

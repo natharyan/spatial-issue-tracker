@@ -201,7 +201,14 @@ export async function getCommentsForIssue(issueId: number) {
 		where: { issueId },
 		orderBy: { createdAt: 'asc' },
 		include: {
-			user: { select: { id: true, name: true } },
+			user: {
+				select: {
+					id: true,
+					name: true,
+					credibility: true,
+					badges: { select: { name: true }, orderBy: { awardedAt: 'asc' } },
+				},
+			},
 			upvotes: { select: { id: true, userId: true } },
 		},
 	});

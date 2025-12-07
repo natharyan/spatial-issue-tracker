@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import * as turf from "@turf/turf";
 import {
     addComment,
     getCommentsForIssue,
@@ -8,6 +9,7 @@ import {
     removeCommentUpvote,
 } from "../../data/issue";
 import { prisma } from "../../data/prisma/prismaClient";
+import { awardPoints } from "../../services/GamificationService";
 
 export async function getComments(req: Request, res: Response) {
     try {
@@ -30,6 +32,8 @@ export async function getComments(req: Request, res: Response) {
             author: {
                 id: String(comment.user.id),
                 name: comment.user.name || "Anonymous",
+                credibility: comment.user.credibility,
+                badges: comment.user.badges.map((b) => b.name),
             },
             upvoteCount: comment.upvotes.length,
             hasUpvoted: req.user ? comment.upvotes.some((u) => u.userId === req.user!.id) : false,
@@ -67,6 +71,18 @@ export async function createComment(req: Request, res: Response) {
         const issue = await prisma.issue.findUnique({ where: { id: issueId } });
         if (!issue) {
             return res.status(404).json({ error: "Issue not found" });
+        }
+
+        // Geofencing check - users must be within 5km of the issue
+        const { userLat, userLng } = req.body;
+        if (userLat === undefined || userLng === undefined) {
+            return res.status(400).json({ error: "Location required to comment. Please enable location access." });
+        }
+        const userPoint = turf.point([userLng, userLat]);
+        const issuePoint = turf.point([issue.longitude, issue.latitude]);
+        const distance = turf.distance(userPoint, issuePoint, { units: "kilometers" });
+        if (distance > 5) {
+            return res.status(403).json({ error: "You must be within 5km of the issue to comment." });
         }
 
         const comment = await addComment(req.user.id, issueId, content.trim());
@@ -143,6 +159,10 @@ export async function upvoteComment(req: Request, res: Response) {
             return res.status(404).json({ error: "Comment not found" });
         }
 
+        if (comment.userId === req.user.id) {
+            return res.status(400).json({ error: "Cannot upvote your own comment" });
+        }
+
         const existing = await prisma.commentUpvote.findFirst({
             where: { commentId, userId: req.user.id },
         });
@@ -151,6 +171,9 @@ export async function upvoteComment(req: Request, res: Response) {
             await removeCommentUpvote(req.user.id, commentId);
         } else {
             await addCommentUpvote(req.user.id, commentId);
+            awardPoints(comment.userId, 5).catch((err) =>
+                console.error("Failed to award points:", err)
+            );
         }
 
         const upvoteCount = await prisma.commentUpvote.count({ where: { commentId } });

@@ -6,6 +6,10 @@ import authRoutes from "./api/routes/authRoutes";
 import issueRoutes from "./api/routes/issueRoutes";
 import commentRoutes from "./api/routes/commentRoutes";
 import notificationRoutes from "./api/routes/notificationRoutes";
+import routeRoutes from "./api/routes/routeRoutes";
+import analyticsRoutes from "./api/routes/analyticsRoutes";
+import userRoutes from "./api/routes/userRoutes";
+import adminRoutes from "./api/routes/adminRoutes";
 import { FRONTEND_URL } from "./appconfig";
 
 const app = express();
@@ -27,8 +31,11 @@ app.use("/auth", authRoutes);
 app.use("/issues", issueRoutes);
 app.use("/", commentRoutes);
 app.use("/notifications", notificationRoutes);
+app.use("/api/route", routeRoutes);
+app.use("/api/analytics", analyticsRoutes);
+app.use("/api/user", userRoutes);
+app.use("/admin", adminRoutes);
 
 app.listen(port, "0.0.0.0", () => {
   console.log(`Server running at http://0.0.0.0:${port}`);
 });
-

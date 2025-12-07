@@ -1,0 +1,5 @@
+azure-functions
+pillow
+requests
+google-generativeai
+psycopg2-binary

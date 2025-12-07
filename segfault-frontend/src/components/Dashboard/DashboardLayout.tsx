@@ -16,11 +16,8 @@ import CategoryFilterPanel from './CategoryFilterPanel';
 
 const DRAWER_WIDTH = 280;
 
-interface DashboardLayoutProps {
-  children: React.ReactNode;
-}
-
-interface FilterState {
+// Move FilterState to a shared location or export it
+export interface FilterState {
   issueType: string;
   statusOpen: boolean;
   statusInProgress: boolean;
@@ -28,34 +25,30 @@ interface FilterState {
   showResolved: boolean;
 }
 
-const DashboardLayout = ({ children }: DashboardLayoutProps) => {
+interface DashboardLayoutProps {
+  children: React.ReactNode;
+  onIssueClick?: (issueId: string) => void;
+  filters: FilterState;
+  onFilterChange: (newFilters: Partial<FilterState>) => void;
+}
+
+const DashboardLayout = ({ children, onIssueClick, filters, onFilterChange }: DashboardLayoutProps) => {
   const theme = useTheme();
   const isMobile = useMediaQuery(theme.breakpoints.down('md'));
   const [drawerOpen, setDrawerOpen] = useState(!isMobile);
-  const [filters, setFilters] = useState<FilterState>({
-    issueType: '',
-    statusOpen: true,
-    statusInProgress: true,
-    urgency: '',
-    showResolved: false,
-  });
 
   const handleDrawerToggle = () => {
     setDrawerOpen(!drawerOpen);
   };
 
-  const handleFilterChange = (newFilters: Partial<FilterState>) => {
-    setFilters((prev) => ({ ...prev, ...newFilters }));
-  };
-
   const toggleResolvedVisibility = () => {
-    setFilters((prev) => ({ ...prev, showResolved: !prev.showResolved }));
+    onFilterChange({ showResolved: !filters.showResolved });
   };
 
   const drawerContent = (
     <CategoryFilterPanel
       filters={filters}
-      onFilterChange={handleFilterChange}
+      onFilterChange={onFilterChange}
       onToggleResolved={toggleResolvedVisibility}
     />
   );
@@ -93,7 +86,7 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
             Public Issues Tracker
           </Typography>
           <NotificationBell />
-          <UserMenu />
+          <UserMenu onIssueClick={onIssueClick} />
         </Toolbar>
       </AppBar>
 
@@ -128,17 +121,6 @@ const DashboardLayout = ({ children }: DashboardLayoutProps) => {
           width: '100%',
           minHeight: '100vh',
           backgroundColor: 'background.default',
-          transition: theme.transitions.create(['margin', 'width'], {
-            easing: theme.transitions.easing.sharp,
-            duration: theme.transitions.duration.leavingScreen,
-          }),
-          ml: drawerOpen && !isMobile ? `${DRAWER_WIDTH}px` : 0,
-          ...(drawerOpen && !isMobile && {
-            transition: theme.transitions.create(['margin', 'width'], {
-              easing: theme.transitions.easing.easeOut,
-              duration: theme.transitions.duration.enteringScreen,
-            }),
-          }),
         }}
       >
         <Toolbar />

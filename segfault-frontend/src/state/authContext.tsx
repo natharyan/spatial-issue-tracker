@@ -4,7 +4,9 @@ export interface User {
   id: string;
   name: string;
   email: string;
-  role: 'USER' | 'GUEST' | 'ADMIN';
+  role: 'USER' | 'GUEST' | 'ADMIN' | 'PIGS';
+  picture?: string;
+  isGov?: boolean;
 }
 
 export interface AuthContextType {
@@ -33,6 +35,8 @@ function decodeJWT(token: string): User | null {
       name: payload.name || payload.email?.split('@')[0] || 'User',
       email: payload.email || '',
       role: payload.role || 'USER',
+      picture: payload.picture || undefined,
+      isGov: payload.isGov || payload.role === 'PIGS' || false,
     };
     console.log('[Auth] Decoded user:', user);
     return user;

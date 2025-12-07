@@ -20,6 +20,7 @@ import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import { issueRoutes, commentRoutes, type Issue, type Comment } from '../../api/routes';
 import { useAuth } from '../../state/authContext';
+import UserBadge from '../Shared/UserBadge';
 
 interface IssueDetailPageProps {
   open: boolean;
@@ -75,28 +76,64 @@ const IssueDetailPage = ({ open, onClose, issueId }: IssueDetailPageProps) => {
   const handleVote = async () => {
     if (!issueId || isGuest) return;
 
-    try {
-      const result = await issueRoutes.voteOnIssue(issueId);
-      setVoteCount(result.voteCount);
-      setHasVoted(result.hasVoted);
-    } catch (err) {
-      console.error('Failed to vote:', err);
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          const result = await issueRoutes.voteOnIssue(issueId, {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+          setVoteCount(result.voteCount);
+          setHasVoted(result.hasVoted);
+        } catch (err: any) {
+          const msg = err?.response?.data?.error || 'Failed to vote';
+          alert(msg);
+        }
+      },
+      (err) => {
+        alert('Location access is required to verify you are an affected user.');
+        console.error('Geolocation error:', err);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleSubmitComment = async () => {
     if (!issueId || !newComment.trim() || isGuest) return;
 
-    try {
-      setSubmittingComment(true);
-      const comment = await commentRoutes.addComment(issueId, newComment.trim());
-      setComments((prev) => [...prev, comment]);
-      setNewComment('');
-    } catch (err) {
-      console.error('Failed to submit comment:', err);
-    } finally {
-      setSubmittingComment(false);
+    if (!navigator.geolocation) {
+      alert('Geolocation is not supported by your browser');
+      return;
     }
+
+    navigator.geolocation.getCurrentPosition(
+      async (position) => {
+        try {
+          setSubmittingComment(true);
+          const comment = await commentRoutes.addComment(issueId, newComment.trim(), {
+            lat: position.coords.latitude,
+            lng: position.coords.longitude,
+          });
+          setComments((prev) => [...prev, comment]);
+          setNewComment('');
+        } catch (err: any) {
+          const msg = err?.response?.data?.error || 'Failed to submit comment';
+          alert(msg);
+        } finally {
+          setSubmittingComment(false);
+        }
+      },
+      (err) => {
+        alert('Location access is required to verify you are an affected user.');
+        console.error('Geolocation error:', err);
+      },
+      { enableHighAccuracy: true, timeout: 10000 }
+    );
   };
 
   const handleUpvoteComment = async (commentId: string) => {
@@ -267,10 +304,17 @@ const IssueDetailPage = ({ open, onClose, issueId }: IssueDetailPageProps) => {
                     {comment.author.name[0]}
                   </Avatar>
                   <Box sx={{ flex: 1 }}>
-                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5 }}>
+                    <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, mb: 0.5, flexWrap: 'wrap' }}>
                       <Typography variant="body2" fontWeight={600}>
                         {comment.author.name}
                       </Typography>
+                      {comment.author.credibility !== undefined && (
+                        <UserBadge
+                          score={comment.author.credibility}
+                          badges={comment.author.badges || []}
+                          compact
+                        />
+                      )}
                       <Typography variant="caption" color="text.secondary">
                         {formatTimeAgo(comment.createdAt)}
                       </Typography>

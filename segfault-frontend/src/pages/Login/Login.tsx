@@ -40,7 +40,11 @@ const Login = () => {
     setError(null);
 
     try {
-      await authAPI.login(email, password);
+      const result = await authAPI.login(email, password);
+      if (result.token) {
+        localStorage.setItem('authToken', result.token);
+        login(result.token);
+      }
       navigate('/dashboard');
     } catch (err) {
       let errorMsg = 'Login failed. Please try again.';

@@ -4,13 +4,14 @@ import { UserRole } from "../generated/prisma/enums";
 // import type { User } from "./src/generated/prisma/client";
 
 // Pass in the hashed password. Must define a role. Dont use this for a guest- skip login entirely
-export async function createNewUser(email: string, password: string, name: string | null, role: UserRole,) {
+export async function createNewUser(email: string, password: string, name: string | null, role: UserRole, picture: string | null = null) {
 	const user = await prisma.user.create({
 		data: {
 			email,
 			password,
 			name,
 			role,
+			picture,
 		},
 	});
 

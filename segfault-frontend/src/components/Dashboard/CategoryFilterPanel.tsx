@@ -28,21 +28,32 @@ interface CategoryFilterPanelProps {
 
 const ISSUE_TYPES = [
   { value: '', label: 'All Types' },
-  { value: 'pothole', label: 'Pothole' },
-  { value: 'streetlight', label: 'Streetlight' },
-  { value: 'graffiti', label: 'Graffiti' },
-  { value: 'trash', label: 'Trash/Litter' },
-  { value: 'sidewalk', label: 'Sidewalk Damage' },
-  { value: 'drainage', label: 'Drainage Issue' },
-  { value: 'other', label: 'Other' },
+  { value: 'POTHOLE', label: 'Pothole' },
+  { value: 'ROAD_DAMAGE', label: 'Road Damage' },
+  { value: 'STREETLIGHT_FAULT', label: 'Streetlight Fault' },
+  { value: 'GARBAGE_UNCOLLECTED', label: 'Garbage Uncollected' },
+  { value: 'ILLEGAL_DUMPING', label: 'Illegal Dumping' },
+  { value: 'DRAINAGE_BLOCKED', label: 'Drainage Blocked' },
+  { value: 'SEWAGE_OVERFLOW', label: 'Sewage Overflow' },
+  { value: 'WATER_SUPPLY_ISSUE', label: 'Water Supply' },
+  { value: 'LOW_WATER_PRESSURE', label: 'Low Water Pressure' },
+  { value: 'OPEN_MANHOLE', label: 'Open Manhole' },
+  { value: 'BROKEN_FOOTPATH', label: 'Broken Footpath' },
+  { value: 'ILLEGAL_ENCROACHMENT', label: 'Illegal Encroachment' },
+  { value: 'STRAY_CATTLE', label: 'Stray Cattle' },
+  { value: 'TREE_FALL', label: 'Tree Fall' },
+  { value: 'TRAFFIC_LIGHT_FAULT', label: 'Traffic Light Fault' },
+  { value: 'MOSQUITO_BREEDING', label: 'Mosquito Breeding' },
+  { value: 'NOISE_COMPLAINT', label: 'Noise Complaint' },
+  { value: 'BUILDING_SAFETY', label: 'Building Safety' },
 ];
 
 const URGENCY_LEVELS = [
   { value: '', label: 'All Urgencies' },
-  { value: 'low', label: 'Low' },
-  { value: 'medium', label: 'Medium' },
-  { value: 'high', label: 'High' },
-  { value: 'critical', label: 'Critical' },
+  { value: 'LOW', label: 'Low' },
+  { value: 'MEDIUM', label: 'Medium' },
+  { value: 'HIGH', label: 'High' },
+  { value: 'CRITICAL', label: 'Critical' },
 ];
 
 const CategoryFilterPanel = ({

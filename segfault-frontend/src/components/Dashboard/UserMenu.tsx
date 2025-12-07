@@ -16,11 +16,19 @@ import PersonIcon from '@mui/icons-material/Person';
 import SettingsIcon from '@mui/icons-material/Settings';
 import { authAPI } from '../../api/axios';
 import { useAuth } from '../../state/authContext';
+import ChangePasswordModal from './ChangePasswordModal';
+import ProfileModal from './ProfileModal';
 
-const UserMenu = () => {
+interface UserMenuProps {
+  onIssueClick?: (issueId: string) => void;
+}
+
+const UserMenu = ({ onIssueClick }: UserMenuProps) => {
   const navigate = useNavigate();
   const { user, logout, isGuest } = useAuth();
   const [anchorEl, setAnchorEl] = useState<null | HTMLElement>(null);
+  const [profileOpen, setProfileOpen] = useState(false);
+  const [passwordOpen, setPasswordOpen] = useState(false);
 
   const handleOpen = (event: React.MouseEvent<HTMLElement>) => {
     setAnchorEl(event.currentTarget);
@@ -38,6 +46,16 @@ const UserMenu = () => {
     }
     logout();
     navigate('/login');
+  };
+
+  const handleProfileClick = () => {
+    handleClose();
+    setProfileOpen(true);
+  };
+
+  const handleSettingsClick = () => {
+    handleClose();
+    setPasswordOpen(true);
   };
 
   const getUserInitial = (): string => {
@@ -71,6 +89,7 @@ const UserMenu = () => {
         }}
       >
         <Avatar
+          src={user?.picture || undefined}
           sx={{
             width: 36,
             height: 36,
@@ -108,22 +127,22 @@ const UserMenu = () => {
         </Box>
         <Divider />
         {!isGuest && (
-          <>
-            <MenuItem onClick={handleClose} sx={{ py: 1.5 }}>
+            <MenuItem onClick={handleProfileClick} sx={{ py: 1.5 }}>
               <ListItemIcon>
                 <PersonIcon fontSize="small" />
               </ListItemIcon>
               <ListItemText>Profile</ListItemText>
             </MenuItem>
-            <MenuItem onClick={handleClose} sx={{ py: 1.5 }}>
+        )}
+        {!isGuest && (
+            <MenuItem onClick={handleSettingsClick} sx={{ py: 1.5 }}>
               <ListItemIcon>
                 <SettingsIcon fontSize="small" />
               </ListItemIcon>
               <ListItemText>Settings</ListItemText>
             </MenuItem>
-            <Divider />
-          </>
         )}
+        {!isGuest && <Divider />}
         <MenuItem
           onClick={handleLogout}
           sx={{
@@ -141,6 +160,13 @@ const UserMenu = () => {
           <ListItemText>Logout</ListItemText>
         </MenuItem>
       </Menu>
+
+      <ChangePasswordModal open={passwordOpen} onClose={() => setPasswordOpen(false)} />
+      <ProfileModal
+        open={profileOpen}
+        onClose={() => setProfileOpen(false)}
+        onIssueClick={onIssueClick}
+      />
     </>
   );
 };

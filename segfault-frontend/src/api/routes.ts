@@ -65,6 +65,8 @@ export interface Comment {
     author: {
         id: string;
         name: string;
+        credibility?: number;
+        badges?: string[];
     };
     upvoteCount: number;
     hasUpvoted: boolean;
@@ -91,6 +93,21 @@ export interface Notification {
 export const authRoutes = {
     logout: async (): Promise<{ success: boolean }> => {
         const response = await api.post('/auth/logout');
+        return response.data;
+    },
+
+    register: async (email: string, password: string, name?: string): Promise<{ ok: boolean; token: string }> => {
+        const response = await api.post('/auth/register', { email, password, name });
+        return response.data;
+    },
+
+    login: async (email: string, password: string): Promise<{ ok: boolean; token: string }> => {
+        const response = await api.post('/auth/login', { email, password });
+        return response.data;
+    },
+
+    changePassword: async (oldPassword: string, newPassword: string): Promise<{ success: boolean }> => {
+        const response = await api.post('/auth/change-password', { oldPassword, newPassword });
         return response.data;
     },
 };
@@ -145,8 +162,11 @@ export const issueRoutes = {
         return response.data;
     },
 
-    voteOnIssue: async (id: string): Promise<{ voteCount: number; hasVoted: boolean }> => {
-        const response = await api.post(`/issues/${id}/vote`);
+    voteOnIssue: async (id: string, location?: { lat: number; lng: number }): Promise<{ voteCount: number; hasVoted: boolean }> => {
+        const response = await api.post(`/issues/${id}/vote`, {
+            userLat: location?.lat,
+            userLng: location?.lng,
+        });
         return response.data;
     },
 
@@ -166,8 +186,11 @@ export const issueRoutes = {
                 maxLat: bounds.maxLat,
                 minLng: bounds.minLng,
                 maxLng: bounds.maxLng,
-                type: filters?.issueType,
-                status: filters?.statusOpen ? 'PENDING' : filters?.statusInProgress ? 'IN_PROGRESS' : undefined,
+                type: filters?.issueType || undefined,
+                statusOpen: filters?.statusOpen,
+                statusInProgress: filters?.statusInProgress,
+                urgency: filters?.urgency || undefined,
+                showResolved: filters?.showResolved,
             },
         });
         return response.data;
@@ -180,8 +203,12 @@ export const commentRoutes = {
         return response.data;
     },
 
-    addComment: async (issueId: string, content: string): Promise<Comment> => {
-        const response = await api.post(`/issues/${issueId}/comments`, { content });
+    addComment: async (issueId: string, content: string, location?: { lat: number; lng: number }): Promise<Comment> => {
+        const response = await api.post(`/issues/${issueId}/comments`, {
+            content,
+            userLat: location?.lat,
+            userLng: location?.lng,
+        });
         return response.data;
     },
 
@@ -201,10 +228,54 @@ export const commentRoutes = {
     },
 };
 
+export interface AnalyticsSummary {
+    personalImpact: {
+        issuesReported: number;
+        issuesResolved: number;
+        resolutionRate: number;
+    } | null;
+    communityHealth: {
+        avgResolutionTimeHours: number;
+        reopenRate: number;
+        totalActiveIssues: number;
+    };
+    trend: Array<{ date: string; reported: number; resolved: number }>;
+}
+
+export interface HeatmapPoint {
+    lat: number;
+    lng: number;
+    weight: number;
+}
+
 export const analyticsRoutes = {
-    getAnalytics: async (params?: { userId?: string; filters?: IssueFilters }): Promise<Analytics> => {
-        const response = await api.get('/analytics', { params });
+    getSummary: async (timeRange?: string): Promise<AnalyticsSummary> => {
+        const response = await api.get('/api/analytics/summary', { params: { timeRange } });
         return response.data;
+    },
+
+    getHeatmap: async (bounds: Bounds): Promise<HeatmapPoint[]> => {
+        const response = await api.get('/api/analytics/heatmap', { params: bounds });
+        return response.data;
+    },
+
+    exportData: async (format: 'csv' | 'json'): Promise<void> => {
+        const response = await api.get('/api/analytics/export', {
+            params: { format },
+            responseType: 'blob',
+        });
+
+        const blob = new Blob([response.data], {
+            type: format === 'csv' ? 'text/csv' : 'application/json',
+        });
+        const url = window.URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `my-civic-report.${format}`;
+        document.body.appendChild(link);
+        link.click();
+        document.body.removeChild(link);
+        window.URL.revokeObjectURL(url);
     },
 };
 
@@ -225,11 +296,129 @@ export const notificationRoutes = {
     },
 };
 
+export interface UserProfile {
+    id: string;
+    name: string | null;
+    email: string;
+    picture: string | null;
+    role: string;
+    credibility: number;
+    badges: Array<{ id: number; name: string; awardedAt: string }>;
+    stats: {
+        issuesReported: number;
+        commentsPosted: number;
+        points: number;
+    };
+}
+
+export interface UserIssue {
+    id: string;
+    title: string;
+    type: string;
+    status: string;
+    location: string;
+    lat: number;
+    lng: number;
+    voteCount: number;
+    commentCount: number;
+    reportedAt: string;
+}
+
+export interface UserComment {
+    id: string;
+    content: string;
+    createdAt: string;
+    issueId: string;
+    issueTitle: string;
+    upvoteCount: number;
+}
+
+export const userRoutes = {
+    getMe: async (): Promise<UserProfile> => {
+        const response = await api.get('/api/user/me');
+        return response.data;
+    },
+
+    getMyIssues: async (): Promise<UserIssue[]> => {
+        const response = await api.get('/api/user/me/issues');
+        return response.data;
+    },
+
+    getMyComments: async (): Promise<UserComment[]> => {
+        const response = await api.get('/api/user/me/comments');
+        return response.data;
+    }
+};
+
+export interface RouteResult {
+    path: Array<{ lat: number; lng: number }>;
+    totalDistance: number;
+    estimatedTime: number;
+}
+
+export const routeRoutes = {
+    findRoute: async (
+        start: { lat: number; lng: number },
+        end: { lat: number; lng: number }
+    ): Promise<RouteResult> => {
+        const response = await api.post('/api/route', { start, end });
+        return response.data;
+    },
+};
+
+// Admin routes
+export interface ModerationItem {
+    id: string;
+    title: string;
+    description: string;
+    type: string;
+    status: string;
+    error: string;
+    authorized: string;
+    severity: number | null;
+    imageBlobId: string | null;
+    createdAt: string;
+    reporter: { id: string; name: string; email: string };
+}
+
+export interface AdminUser {
+    id: string;
+    name: string;
+    email: string;
+    role: string;
+    isBanned: boolean;
+    createdAt: string;
+}
+
+export const adminRoutes = {
+    getModerationQueue: async (): Promise<ModerationItem[]> => {
+        const response = await api.get('/admin/moderation');
+        return response.data;
+    },
+
+    resolveModeration: async (issueId: string, action: 'APPROVE' | 'REJECT'): Promise<{ success: boolean; message: string }> => {
+        const response = await api.post(`/admin/moderation/${issueId}/resolve`, { action });
+        return response.data;
+    },
+
+    getUsers: async (page?: number): Promise<{ users: AdminUser[]; total: number; page: number; pageSize: number }> => {
+        const response = await api.get('/admin/users', { params: { page } });
+        return response.data;
+    },
+
+    banUser: async (userId: string, reason?: string): Promise<{ success: boolean; message: string }> => {
+        const response = await api.post(`/admin/users/${userId}/ban`, { reason });
+        return response.data;
+    },
+};
+
 export default {
     auth: authRoutes,
     issues: issueRoutes,
     comments: commentRoutes,
     analytics: analyticsRoutes,
     notifications: notificationRoutes,
+    route: routeRoutes,
+    user: userRoutes,
+    admin: adminRoutes,
 };
-

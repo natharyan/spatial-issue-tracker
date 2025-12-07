@@ -1,4 +1,5 @@
 import type { Request, Response } from "express";
+import * as turf from "@turf/turf";
 import {
     createAuthenticatedIssue,
     createGuestIssue,
@@ -12,6 +13,8 @@ import {
 } from "../../data/issue";
 import { prisma } from "../../data/prisma/prismaClient";
 import { IssueStatus, IssueType } from "../../generated/prisma/enums";
+import { recalculatePenalties } from "../../services/PenaltyService";
+import { sendToModerationQueue } from "../../services/QueueService";
 
 const ISSUE_TYPE_INFO: Record<string, { name: string; department: string }> = {
     POTHOLE: { name: "Pothole", department: "Public Works Department" },
@@ -178,6 +181,21 @@ export async function createIssue(req: Request, res: Response) {
             issue = await createAuthenticatedIssue(title, description, latitude, longitude, issueType, req.user.id, imageBlobId);
         }
 
+        recalculatePenalties().catch((err) =>
+            console.error("Failed to recalculate penalties:", err)
+        );
+
+        if (imageBlobId) {
+            const blobUrl = `${process.env.BACKEND_URL || "http://localhost:3000"}/uploads/${imageBlobId}`;
+            sendToModerationQueue({
+                issueId: issue.id,
+                blobUrl,
+                latitude,
+                longitude,
+                issueType,
+            }).catch((err) => console.error("Failed to queue moderation:", err));
+        }
+
         return res.status(201).json({
             id: String(issue.id),
             title: issue.title,
@@ -215,6 +233,18 @@ export async function voteOnIssue(req: Request, res: Response) {
             return res.status(404).json({ error: "Issue not found" });
         }
 
+        // Geofencing check - users must be within 5km of the issue
+        const { userLat, userLng } = req.body;
+        if (userLat === undefined || userLng === undefined) {
+            return res.status(400).json({ error: "Location required to vote. Please enable location access." });
+        }
+        const userPoint = turf.point([userLng, userLat]);
+        const issuePoint = turf.point([issue.longitude, issue.latitude]);
+        const distance = turf.distance(userPoint, issuePoint, { units: "kilometers" });
+        if (distance > 5) {
+            return res.status(403).json({ error: "You must be within 5km of the issue to vote." });
+        }
+
         const hasVoted = await hasUserUpvotedIssue(req.user.id, issueId);
 
         if (hasVoted) {
@@ -247,29 +277,27 @@ export async function getIssuesInBounds(req: Request, res: Response) {
             });
         }
 
-        // Optional filters
-        const typeFilter = req.query.type as string | undefined;
-        const statusFilter = req.query.status as string | undefined;
-
-        const filters: { type?: IssueType; status?: IssueStatus } = {};
-        if (typeFilter && Object.values(IssueType).includes(typeFilter as IssueType)) {
-            filters.type = typeFilter as IssueType;
-        }
-        if (statusFilter && Object.values(IssueStatus).includes(statusFilter as IssueStatus)) {
-            filters.status = statusFilter as IssueStatus;
-        }
-
-        const issues = await getIssuesByLocationBox(minLat, maxLat, minLng, maxLng, filters);
+        // Use the cache service for fast loading
+        const { getIssuesInBounds: getCachedIssues } = await import("../../services/IssueCacheService");
+        const showResolved = req.query.showResolved === 'true';
+        const cachedIssues = await getCachedIssues(minLat, maxLat, minLng, maxLng, showResolved);
 
         // Calculate urgency score and format response
         const now = new Date();
-        const formatted = issues.map((issue) => {
-            // Calculate hours since creation
-            const hoursSinceCreation = (now.getTime() - issue.createdAt.getTime()) / (1000 * 60 * 60);
+        const issueType = req.query.type as string | undefined;
+        const statusOpen = req.query.statusOpen === 'true';
+        const statusInProgress = req.query.statusInProgress === 'true';
+        const urgencyFilter = req.query.urgency as string | undefined;
 
-            // Urgency formula: (hoursSinceCreation * 0.5) + (upvotes * 2) + (comments * 1), capped at 100
-            const rawUrgency =
-                hoursSinceCreation * 0.5 + issue._count.upvotes * 2 + issue._count.comments * 1;
+        console.log(`[MapDebug] Filters: Type=${issueType}, Open=${statusOpen}, InProgress=${statusInProgress}, Urgency=${urgencyFilter}, ShowResolved=${showResolved}`);
+        console.log(`[MapDebug] Raw issues from cache/DB: ${cachedIssues.length}`);
+
+        let formatted = cachedIssues.map((issue) => {
+            // Calculate hours since creation
+            const hoursSinceCreation = (now.getTime() - new Date(issue.createdAt).getTime()) / (1000 * 60 * 60);
+
+            // Urgency formula: (hoursSinceCreation * 0.5) + (upvotes * 2), capped at 100
+            const rawUrgency = hoursSinceCreation * 0.5 + issue.voteCount * 2;
             const urgencyScore = Math.min(100, Math.round(rawUrgency));
 
             return {
@@ -277,15 +305,59 @@ export async function getIssuesInBounds(req: Request, res: Response) {
                 title: issue.title,
                 type: issue.issueType,
                 status: issue.status,
-                description: issue.description,
                 lat: issue.latitude,
                 lng: issue.longitude,
-                voteCount: issue._count.upvotes,
-                commentCount: issue._count.comments,
+                voteCount: issue.voteCount,
+                commentCount: issue.commentCount,
                 urgencyScore,
-                reportedAt: issue.createdAt.toISOString(),
+                reportedAt: issue.createdAt,
             };
         });
+
+        // Apply filters
+        formatted = formatted.filter(issue => {
+            // Type filter
+            if (issueType && issue.type !== issueType) return false;
+
+            // Status filter
+            // Note: issue.status is from DB enum (OPEN, IN_PROGRESS, RESOLVED, REJECTED)
+            // statusOpen covers OPEN (and PENDING if exists)
+            // statusInProgress covers IN_PROGRESS
+            // showResolved covers RESOLVED (handled partly in cache fetching but good to double check)
+
+            let statusMatch = false;
+            // logic: if NO status filters are active (logic suggests we default to showing something, but UI defaults to Open+InProgress selected)
+            // If the UI passes these as flags, we check if the issue status matches an ACTIVE flag.
+
+            if (issue.status === 'RESOLVED') {
+                if (showResolved) statusMatch = true;
+            } else if (issue.status === 'IN_PROGRESS') {
+                if (statusInProgress) statusMatch = true;
+            } else if (issue.status === 'OPEN' || issue.status === 'PENDING') { // Assuming PENDING might exist in enum or just OPEN
+                if (statusOpen) statusMatch = true;
+            } else {
+                // For other statuses (e.g. REJECTED), default to showing if nothing else matches? 
+                // Or maybe strict filtering. Let's assume strict based on checkboxes.
+                // If the issue is REJECTED, and we don't have a checkbox for it, it might hide?
+                // Let's assume statusOpen covers 'OPEN'
+                if (statusOpen) statusMatch = true; // Fallback for basic OPEN
+            }
+
+            if (!statusMatch) return false;
+
+            // Urgency filter
+            if (urgencyFilter) {
+                if (urgencyFilter === 'CRITICAL' && issue.urgencyScore < 80) return false;
+                if (urgencyFilter === 'HIGH' && issue.urgencyScore < 60) return false;
+                if (urgencyFilter === 'MEDIUM' && issue.urgencyScore < 40) return false;
+                if (urgencyFilter === 'LOW' && issue.urgencyScore >= 40) return false; // Low implies strictly low? Map usually filters inclusive?
+                // Let's assume inclusive logic or simple thresholds
+            }
+
+            return true;
+        });
+
+        console.log(`[MapDebug] Returning ${formatted.length} issues after filtering`);
 
         return res.json(formatted);
     } catch (err) {
@@ -294,4 +366,58 @@ export async function getIssuesInBounds(req: Request, res: Response) {
     }
 }
 
-export default { getIssues, getIssueTypes, getIssue, createIssue, voteOnIssue, getIssuesInBounds };
+export async function updateIssueStatus(req: Request, res: Response) {
+    try {
+        if (!req.user) {
+            return res.status(401).json({ error: "Authentication required" });
+        }
+
+        if (req.user.role !== "ADMIN") {
+            return res.status(403).json({ error: "Admin access required" });
+        }
+
+        const issueId = parseInt(req.params.id || "");
+        if (isNaN(issueId)) {
+            return res.status(400).json({ error: "Invalid issue ID" });
+        }
+
+        const { status } = req.body;
+        if (!status || !Object.values(IssueStatus).includes(status)) {
+            return res.status(400).json({ error: "Invalid status value" });
+        }
+
+        const issue = await prisma.issue.findUnique({
+            where: { id: issueId },
+            select: { userId: true, status: true },
+        });
+
+        if (!issue) {
+            return res.status(404).json({ error: "Issue not found" });
+        }
+
+        const prevStatus = issue.status;
+
+        const updated = await prisma.issue.update({
+            where: { id: issueId },
+            data: { status: status as IssueStatus },
+        });
+
+        if (status === IssueStatus.RESOLVED && prevStatus !== IssueStatus.RESOLVED) {
+            const { awardPoints } = await import("../../services/GamificationService");
+            awardPoints(issue.userId, 20).catch((err) =>
+                console.error("Failed to award points for resolution:", err)
+            );
+        }
+
+        return res.json({
+            id: String(updated.id),
+            status: updated.status,
+            message: "Status updated successfully",
+        });
+    } catch (err) {
+        console.error("Error updating issue status:", err);
+        return res.status(500).json({ error: "Failed to update status" });
+    }
+}
+
+export default { getIssues, getIssueTypes, getIssue, createIssue, voteOnIssue, getIssuesInBounds, updateIssueStatus };
