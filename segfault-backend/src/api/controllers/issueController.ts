@@ -4,6 +4,7 @@ import {
     createGuestIssue,
     getIssueById,
     getIssuesByStatus,
+    getIssuesByLocationBox,
     addIssueUpvote,
     removeIssueUpvote,
     getIssueUpvoteCount,
@@ -165,11 +166,16 @@ export async function createIssue(req: Request, res: Response) {
         const longitude = parseFloat(lng) || 0;
         const title = `${ISSUE_TYPE_INFO[issueType]?.name || type} Report`;
 
+        // Get uploaded file from multer middleware (if any)
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const uploadedFile = (req as any).file as { filename: string } | undefined;
+        const imageBlobId = uploadedFile?.filename;
+
         let issue;
         if (req.user.role === "GUEST" && req.user.guestTokenId) {
-            issue = await createGuestIssue(title, description, latitude, longitude, issueType, req.user.guestTokenId);
+            issue = await createGuestIssue(title, description, latitude, longitude, issueType, req.user.guestTokenId, imageBlobId);
         } else {
-            issue = await createAuthenticatedIssue(title, description, latitude, longitude, issueType, req.user.id);
+            issue = await createAuthenticatedIssue(title, description, latitude, longitude, issueType, req.user.id, imageBlobId);
         }
 
         return res.status(201).json({
@@ -179,6 +185,7 @@ export async function createIssue(req: Request, res: Response) {
             status: issue.status,
             description: issue.description,
             location: `${issue.latitude}, ${issue.longitude}`,
+            imageBlobId: issue.imageBlobId,
             reportedAt: issue.createdAt.toISOString(),
         });
     } catch (err) {
@@ -225,4 +232,66 @@ export async function voteOnIssue(req: Request, res: Response) {
     }
 }
 
-export default { getIssues, getIssueTypes, getIssue, createIssue, voteOnIssue };
+export async function getIssuesInBounds(req: Request, res: Response) {
+    try {
+        // Parse query parameters - they arrive as strings
+        const minLat = parseFloat(req.query.minLat as string);
+        const maxLat = parseFloat(req.query.maxLat as string);
+        const minLng = parseFloat(req.query.minLng as string);
+        const maxLng = parseFloat(req.query.maxLng as string);
+
+        // Validate required parameters
+        if (isNaN(minLat) || isNaN(maxLat) || isNaN(minLng) || isNaN(maxLng)) {
+            return res.status(400).json({
+                error: "Invalid bounds. Required: minLat, maxLat, minLng, maxLng as valid numbers",
+            });
+        }
+
+        // Optional filters
+        const typeFilter = req.query.type as string | undefined;
+        const statusFilter = req.query.status as string | undefined;
+
+        const filters: { type?: IssueType; status?: IssueStatus } = {};
+        if (typeFilter && Object.values(IssueType).includes(typeFilter as IssueType)) {
+            filters.type = typeFilter as IssueType;
+        }
+        if (statusFilter && Object.values(IssueStatus).includes(statusFilter as IssueStatus)) {
+            filters.status = statusFilter as IssueStatus;
+        }
+
+        const issues = await getIssuesByLocationBox(minLat, maxLat, minLng, maxLng, filters);
+
+        // Calculate urgency score and format response
+        const now = new Date();
+        const formatted = issues.map((issue) => {
+            // Calculate hours since creation
+            const hoursSinceCreation = (now.getTime() - issue.createdAt.getTime()) / (1000 * 60 * 60);
+
+            // Urgency formula: (hoursSinceCreation * 0.5) + (upvotes * 2) + (comments * 1), capped at 100
+            const rawUrgency =
+                hoursSinceCreation * 0.5 + issue._count.upvotes * 2 + issue._count.comments * 1;
+            const urgencyScore = Math.min(100, Math.round(rawUrgency));
+
+            return {
+                id: String(issue.id),
+                title: issue.title,
+                type: issue.issueType,
+                status: issue.status,
+                description: issue.description,
+                lat: issue.latitude,
+                lng: issue.longitude,
+                voteCount: issue._count.upvotes,
+                commentCount: issue._count.comments,
+                urgencyScore,
+                reportedAt: issue.createdAt.toISOString(),
+            };
+        });
+
+        return res.json(formatted);
+    } catch (err) {
+        console.error("Error fetching map issues:", err);
+        return res.status(500).json({ error: "Failed to fetch map issues" });
+    }
+}
+
+export default { getIssues, getIssueTypes, getIssue, createIssue, voteOnIssue, getIssuesInBounds };

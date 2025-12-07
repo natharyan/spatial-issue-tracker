@@ -25,6 +25,7 @@ import {
 import CloseIcon from '@mui/icons-material/Close';
 import MyLocationIcon from '@mui/icons-material/MyLocation';
 import PhotoUploader from './PhotoUploader';
+import LocationPicker from '../Map/LocationPicker';
 import { issueRoutes, type IssueType } from '../../api/routes';
 
 interface IssueReportFormProps {
@@ -220,7 +221,7 @@ const IssueReportForm = ({ open, onClose }: IssueReportFormProps) => {
               <TextField
                 label="Coordinates"
                 value={formData.lat && formData.lng ? `${formData.lat.toFixed(6)}, ${formData.lng.toFixed(6)}` : ''}
-                placeholder="Click button to get location"
+                placeholder="Click button or use map to set location"
                 fullWidth
                 InputProps={{
                   readOnly: true,
@@ -239,6 +240,17 @@ const IssueReportForm = ({ open, onClose }: IssueReportFormProps) => {
                     </InputAdornment>
                   ),
                 }}
+              />
+            </Box>
+
+            <Box>
+              <Typography variant="subtitle2" sx={{ mb: 1 }}>
+                Or select on map
+              </Typography>
+              <LocationPicker
+                lat={formData.lat}
+                lng={formData.lng}
+                onChange={(lat, lng) => setFormData((prev) => ({ ...prev, lat, lng }))}
               />
             </Box>
 

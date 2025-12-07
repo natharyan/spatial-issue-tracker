@@ -30,6 +30,27 @@ export interface Issue {
     reporterId?: string;
 }
 
+export interface Bounds {
+    minLat: number;
+    maxLat: number;
+    minLng: number;
+    maxLng: number;
+}
+
+export interface MapIssue {
+    id: string;
+    title: string;
+    type: string;
+    status: string;
+    description: string;
+    lat: number;
+    lng: number;
+    voteCount: number;
+    commentCount: number;
+    urgencyScore: number;
+    reportedAt: string;
+}
+
 export interface IssueType {
     id: string;
     name: string;
@@ -86,24 +107,36 @@ export const issueRoutes = {
     },
 
     reportIssue: async (data: IssueReportData): Promise<Issue> => {
-        const formData = new FormData();
-        formData.append('type', data.type);
-        formData.append('description', data.description);
-        formData.append('isAnonymous', String(data.isAnonymous));
-        if (data.lat !== undefined) {
-            formData.append('lat', String(data.lat));
-        }
-        if (data.lng !== undefined) {
-            formData.append('lng', String(data.lng));
-        }
-        if (data.files) {
-            data.files.forEach((file) => {
-                formData.append('files', file);
+        // If files are present, send as FormData for multer to process
+        if (data.files && data.files.length > 0) {
+            const formData = new FormData();
+            formData.append('type', data.type);
+            formData.append('description', data.description);
+            formData.append('isAnonymous', String(data.isAnonymous));
+            if (data.lat !== undefined) {
+                formData.append('lat', String(data.lat));
+            }
+            if (data.lng !== undefined) {
+                formData.append('lng', String(data.lng));
+            }
+            // Backend expects single file with field name 'file'
+            formData.append('file', data.files[0]);
+
+            const response = await api.post('/issues/report', formData, {
+                headers: { 'Content-Type': 'multipart/form-data' },
             });
+            return response.data;
         }
-        const response = await api.post('/issues/report', formData, {
-            headers: { 'Content-Type': 'multipart/form-data' },
-        });
+
+        // No files, send as JSON
+        const payload = {
+            type: data.type,
+            description: data.description,
+            isAnonymous: data.isAnonymous,
+            lat: data.lat,
+            lng: data.lng,
+        };
+        const response = await api.post('/issues/report', payload);
         return response.data;
     },
 
@@ -122,6 +155,20 @@ export const issueRoutes = {
         formData.append('file', file);
         const response = await api.post('/issues/validate-photo', formData, {
             headers: { 'Content-Type': 'multipart/form-data' },
+        });
+        return response.data;
+    },
+
+    getMapIssues: async (bounds: Bounds, filters?: IssueFilters): Promise<MapIssue[]> => {
+        const response = await api.get('/issues/map', {
+            params: {
+                minLat: bounds.minLat,
+                maxLat: bounds.maxLat,
+                minLng: bounds.minLng,
+                maxLng: bounds.maxLng,
+                type: filters?.issueType,
+                status: filters?.statusOpen ? 'PENDING' : filters?.statusInProgress ? 'IN_PROGRESS' : undefined,
+            },
         });
         return response.data;
     },

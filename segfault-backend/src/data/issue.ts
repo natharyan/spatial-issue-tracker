@@ -10,6 +10,7 @@ export async function createAuthenticatedIssue(
 	longitude: number,
 	issueType: IssueType,
 	userId: number,
+	imageBlobId?: string,
 ) {
 	const issue = await prisma.issue.create({
 		data: {
@@ -19,7 +20,10 @@ export async function createAuthenticatedIssue(
 			longitude,
 			issueType,
 			userId,
-			authorized: IssueAuthorized.FALSE,
+			imageBlobId: imageBlobId ?? null,
+			// Dev mode: set all issues as valid/authorized by default
+			authorized: IssueAuthorized.TRUE,
+			error: IssueError.NONE,
 		},
 	});
 
@@ -33,8 +37,9 @@ export async function createGuestIssue(
 	longitude: number,
 	issueType: IssueType,
 	guestTokenId: number,
+	imageBlobId?: string,
 	// All "invalid" users get assigned to userId -1. This is required by the schema, so added here.
-    // If guest token id is NOT null, then ignore the userID field
+	// If guest token id is NOT null, then ignore the userID field
 ) {
 	const issue = await prisma.issue.create({
 		data: {
@@ -45,7 +50,10 @@ export async function createGuestIssue(
 			issueType,
 			guestTokenId,
 			userId: -1,
-			authorized: IssueAuthorized.FALSE,
+			imageBlobId: imageBlobId ?? null,
+			// Dev mode: set all issues as valid/authorized by default
+			authorized: IssueAuthorized.TRUE,
+			error: IssueError.NONE,
 		},
 	});
 
@@ -106,18 +114,25 @@ export async function getIssueById(issueId: number) {
 }
 
 // TODO: Change this to use postGIS (done)
-export async function getIssuesByLocationBox(minLat: number, maxLat: number, minLng: number, maxLng: number) {
-    // (longitude, latitude) order for points
-    const issues = await prisma.$queryRaw`
-        SELECT *import { prisma } from './prisma/prismaClient';
-        FROM "Issue"
-        WHERE ST_Within(
-            "location",
-            ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)
-        )
-        ORDER BY "createdAt" DESC
-    `;
-    return issues;
+export async function getIssuesByLocationBox(
+	minLat: number,
+	maxLat: number,
+	minLng: number,
+	maxLng: number,
+	filters?: { type?: IssueType; status?: IssueStatus }
+) {
+	return await prisma.issue.findMany({
+		where: {
+			latitude: { gte: minLat, lte: maxLat },
+			longitude: { gte: minLng, lte: maxLng },
+			...(filters?.type && { issueType: filters.type }),
+			...(filters?.status && { status: filters.status }),
+		},
+		include: {
+			_count: { select: { upvotes: true, comments: true } },
+		},
+		orderBy: { createdAt: "desc" },
+	});
 }
 
 export async function getIssuesByStatus(status: IssueStatus) {
