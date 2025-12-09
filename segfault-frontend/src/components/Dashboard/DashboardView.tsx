@@ -42,10 +42,10 @@ const DashboardView = () => {
         <Box sx={{ width: '100%', maxWidth: '100%', px: 2 }}>
             <Box sx={{ display: 'flex', justifyContent: 'space-between', alignItems: 'flex-start', mb: 4, flexWrap: 'wrap', gap: 2 }}>
                 <Box>
-                    <Typography variant="h4" fontWeight={700} gutterBottom>
+                    <Typography variant="h4" fontWeight={700} gutterBottom sx={{ color: '#f8fafc' }}>
                         Analytics Dashboard
                     </Typography>
-                    <Typography variant="body1" color="text.secondary">
+                    <Typography variant="body1" sx={{ color: '#94a3b8' }}>
                         Track community health and your personal impact
                     </Typography>
                 </Box>
@@ -55,6 +55,21 @@ const DashboardView = () => {
                         exclusive
                         onChange={handleTimeRangeChange}
                         size="small"
+                        sx={{
+                            bgcolor: 'rgba(255, 255, 255, 0.03)',
+                            border: '1px solid rgba(255, 255, 255, 0.05)',
+                            borderRadius: 2,
+                            '& .MuiToggleButton-root': {
+                                color: '#94a3b8',
+                                border: 'none',
+                                '&.Mui-selected': {
+                                    bgcolor: 'rgba(124, 58, 237, 0.2)',
+                                    color: '#f8fafc',
+                                    '&:hover': { bgcolor: 'rgba(124, 58, 237, 0.3)' }
+                                },
+                                '&:hover': { bgcolor: 'rgba(255, 255, 255, 0.05)' }
+                            }
+                        }}
                     >
                         <ToggleButton value="7d">Last Week</ToggleButton>
                         <ToggleButton value="30d">Last Month</ToggleButton>
