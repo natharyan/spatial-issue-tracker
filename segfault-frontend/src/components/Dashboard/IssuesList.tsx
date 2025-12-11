@@ -27,6 +27,7 @@ import SearchIcon from '@mui/icons-material/Search';
 import SortIcon from '@mui/icons-material/Sort';
 import { issueRoutes, type Issue } from '../../api/routes';
 import { useAuth } from '../../state/authContext';
+import { AZURE_BACKEND_URL } from '../../constants';
 
 interface IssuesListProps {
     onIssueClick?: (issueId: string) => void;
@@ -128,7 +129,7 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
         const issueId = statusMenuAnchor.issueId;
         handleStatusMenuClose();
         try {
-            await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/issues/${issueId}/status`, {
+            await fetch(`${AZURE_BACKEND_URL}/issues/${issueId}/status`, {
                 method: 'PATCH',
                 headers: {
                     'Content-Type': 'application/json',
