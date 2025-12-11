@@ -77,7 +77,7 @@ Write-Host "Backend URL: $BACKEND_URL" -ForegroundColor Cyan
 # ============================================
 Write-Host "`n[4/6] Building frontend image with API URL..." -ForegroundColor Yellow
 Set-Location -Path "$PSScriptRoot/segfault-frontend"
-az acr build --registry $ACR_NAME --image "segfault-frontend:latest" --build-arg "VITE_API_URL=$BACKEND_URL" .
+az acr build --registry $ACR_NAME --image "segfault-frontend:latest" --build-arg "VITE_API_URL=$BACKEND_URL" --no-cache .
 
 Write-Host "`n[5/6] Deploying frontend..." -ForegroundColor Yellow
 $frontendExists = az containerapp show --name "segfault-frontend" --resource-group $RESOURCE_GROUP 2>$null
