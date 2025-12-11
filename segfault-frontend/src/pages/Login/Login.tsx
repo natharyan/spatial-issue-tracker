@@ -27,6 +27,7 @@ import {
 import { authAPI } from '../../api/axios';
 import { AxiosError } from 'axios';
 import { useAuth } from '../../state/authContext';
+import { AZURE_BACKEND_URL } from '../../constants';
 
 const Login = () => {
     const navigate = useNavigate();
@@ -96,8 +97,7 @@ const Login = () => {
 
     const handleGoogleLogin = () => {
         const clientId = import.meta.env.VITE_GOOGLE_CLIENT_ID;
-        const apiUrl = import.meta.env.VITE_API_URL;
-        const redirectUri = import.meta.env.VITE_GOOGLE_REDIRECT_URI || `${apiUrl}/auth/callback`;
+        const redirectUri = `${AZURE_BACKEND_URL}/auth/callback`;
         const scope = 'openid email profile';
 
         const googleAuthUrl = `https://accounts.google.com/o/oauth2/v2/auth?client_id=${clientId}&redirect_uri=${encodeURIComponent(redirectUri)}&response_type=code&scope=${encodeURIComponent(scope)}&access_type=offline&prompt=consent`;

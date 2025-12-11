@@ -23,6 +23,7 @@ import CheckCircleIcon from '@mui/icons-material/CheckCircle';
 import CancelIcon from '@mui/icons-material/Cancel';
 import BlockIcon from '@mui/icons-material/Block';
 import { adminRoutes, type ModerationItem, type AdminUser } from '../../api/routes';
+import { AZURE_BACKEND_URL } from '../../constants';
 
 const AdminDashboard = () => {
     const [tab, setTab] = useState(0);
@@ -138,7 +139,7 @@ const AdminDashboard = () => {
                                             {item.imageBlobId ? (
                                                 <Avatar
                                                     variant="rounded"
-                                                    src={`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/uploads/${item.imageBlobId}`}
+                                                    src={`${AZURE_BACKEND_URL}/uploads/${item.imageBlobId}`}
                                                     sx={{ width: 60, height: 60 }}
                                                 />
                                             ) : (

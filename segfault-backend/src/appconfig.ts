@@ -1,4 +1,4 @@
-export const FRONTEND_URL = process.env.FRONTEND_URL ?? 'http://localhost:5173';
+export const FRONTEND_URL = process.env.FRONTEND_URL ?? 'https://segfault-frontend.politeriver-a25e3b65.westeurope.azurecontainerapps.io';
 
 export const GOOGLE_OAUTH = {
 	CLIENT_ID: process.env.GOOGLE_CLIENT_ID ?? '1030819278738-1fnklv7adb14ktovidi3ate2rlbhbe53.apps.googleusercontent.com',
