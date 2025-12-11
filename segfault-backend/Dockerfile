@@ -31,6 +31,7 @@ ENV DATABASE_URL="postgresql://neondb_owner:npg_5GC3NzTORMYr@ep-restless-pine-a1
 ENV STORAGE_CONNECTION_STRING="DefaultEndpointsProtocol=https;AccountName=segfaultstorage3103;AccountKey=W8uzLvLydsQtC+S343wFzVW/67oeG4ulJ0aUiAjQA4F2pP+YBABgyV8gZMgdU2T1Vssn6syDzmOY+AStzwOwMQ==;EndpointSuffix=core.windows.net"
 ENV REDIS_HOSTNAME="segfaultredis.redis.cache.windows.net"
 ENV REDIS_ACCESS_KEY="OUW6tF0Qz9E0evWmQIeJ8sKAjKsPYxSkTAzCaDN3iFM="
+ENV VITE_API_URL = "https://segfault-backend.politeriver-a25e3b65.westeurope.azurecontainerapps.io"
 
 EXPOSE 3000
 
