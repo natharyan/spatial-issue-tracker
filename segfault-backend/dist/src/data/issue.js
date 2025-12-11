@@ -3,10 +3,13 @@ import { prisma } from "./prisma/prismaClient";
 import { IssueStatus, IssueType, IssueAuthorized, IssueError } from "../generated/prisma/enums";
 // Issue Creation and Management
 export async function createAuthenticatedIssue(title, description, latitude, longitude, issueType, userId, imageBlobId) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error("Invalid latitude/longitude");
+    }
     // Use SQL to insert with PostGIS geometry
     const result = await prisma.$queryRaw `
-		INSERT INTO "Issue" (title, description, location, "issueType", "userId", "imageBlobId", authorized, error, "createdAt")
-		VALUES (${title}, ${description}, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${issueType}::"IssueType", ${userId}, ${imageBlobId}, 'FALSE'::"IssueAuthorized", 'PENDING'::"IssueError", NOW())
+		INSERT INTO "Issue" (title, description, latitude, longitude, location, "issueType", "userId", "imageBlobId", authorized, error, "createdAt")
+		VALUES (${title}, ${description}, ${latitude}, ${longitude}, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${issueType}::"IssueType", ${userId}, ${imageBlobId}, 'FALSE'::"IssueAuthorized", 'PENDING'::"IssueError", NOW())
 		RETURNING id
 	`;
     const issueId = result[0]?.id;
@@ -16,9 +19,12 @@ export async function createAuthenticatedIssue(title, description, latitude, lon
     return getIssueById(issueId);
 }
 export async function createGuestIssue(title, description, latitude, longitude, issueType, guestTokenId, imageBlobId) {
+    if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+        throw new Error("Invalid latitude/longitude");
+    }
     const result = await prisma.$queryRaw `
-		INSERT INTO "Issue" (title, description, location, "issueType", "guestTokenId", "userId", "imageBlobId", authorized, error, "createdAt")
-		VALUES (${title}, ${description}, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${issueType}::"IssueType", ${guestTokenId}, -1, ${imageBlobId}, 'FALSE'::"IssueAuthorized", 'PENDING'::"IssueError", NOW())
+		INSERT INTO "Issue" (title, description, latitude, longitude, location, "issueType", "guestTokenId", "userId", "imageBlobId", authorized, error, "createdAt")
+		VALUES (${title}, ${description}, ${latitude}, ${longitude}, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${issueType}::"IssueType", ${guestTokenId}, -1, ${imageBlobId}, 'FALSE'::"IssueAuthorized", 'PENDING'::"IssueError", NOW())
 		RETURNING id
 	`;
     const issueId = result[0]?.id;

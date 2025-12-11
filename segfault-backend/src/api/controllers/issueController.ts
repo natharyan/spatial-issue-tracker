@@ -169,16 +169,17 @@ export async function getIssue(req: Request, res: Response) {
             status: issue.status,
             description: issue.description,
             location: `${issue.latitude}, ${issue.longitude}`,
-            lat: issue.latitude,
-            lng: issue.longitude,
-            voteCount: issue._count.upvotes,
-            commentCount: issue._count.comments,
+            lat: Number(issue.latitude),
+            lng: Number(issue.longitude),
+            voteCount: Number(issue._count.upvotes),
+            commentCount: Number(issue._count.comments),
             hasVoted,
             reportedAt: issue.createdAt.toISOString(),
             reporter: issue.guestTokenId || !issue.user
                 ? { name: "Anonymous", isGuest: true }
                 : { id: String(issue.user.id), name: issue.user.name, email: issue.user.email },
         };
+
 
         return res.json(formatted);
     } catch (err) {
@@ -204,8 +205,17 @@ export async function createIssue(req: Request, res: Response) {
             return res.status(400).json({ error: "Invalid issue type" });
         }
 
-        const latitude = parseFloat(lat) || 0;
-        const longitude = parseFloat(lng) || 0;
+        const latitude = typeof lat === 'number' ? lat : parseFloat(String(lat));
+        const longitude = typeof lng === 'number' ? lng : parseFloat(String(lng));
+
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return res.status(400).json({ error: "Valid lat and lng are required" });
+        }
+
+        if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+            return res.status(400).json({ error: "lat/lng out of range" });
+        }
+
         const title = `${ISSUE_TYPE_INFO[issueType]?.name || type} Report`;
 
         // Get uploaded file from multer memory storage (if any)

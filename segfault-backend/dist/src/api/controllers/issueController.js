@@ -161,8 +161,14 @@ export async function createIssue(req, res) {
         if (!Object.values(IssueType).includes(issueType)) {
             return res.status(400).json({ error: "Invalid issue type" });
         }
-        const latitude = parseFloat(lat) || 0;
-        const longitude = parseFloat(lng) || 0;
+        const latitude = typeof lat === 'number' ? lat : parseFloat(String(lat));
+        const longitude = typeof lng === 'number' ? lng : parseFloat(String(lng));
+        if (!Number.isFinite(latitude) || !Number.isFinite(longitude)) {
+            return res.status(400).json({ error: "Valid lat and lng are required" });
+        }
+        if (latitude < -90 || latitude > 90 || longitude < -180 || longitude > 180) {
+            return res.status(400).json({ error: "lat/lng out of range" });
+        }
         const title = `${ISSUE_TYPE_INFO[issueType]?.name || type} Report`;
         // Get uploaded file from multer memory storage (if any)
         // eslint-disable-next-line @typescript-eslint/no-explicit-any
