@@ -35,53 +35,52 @@ export async function recalculatePenalties(): Promise<void> {
         data: { penalty: 1.0 },
     });
 
-    // Get all active (non-resolved) issues
-    const activeIssues = await prisma.issue.findMany({
-        where: {
-            status: { not: IssueStatus.RESOLVED },
-        },
-        select: {
-            id: true,
-            latitude: true,
-            longitude: true,
-            issueType: true,
-            severity: true,
-        },
-    });
+    // Get all active (non-resolved) issues using PostGIS
+    const activeIssues = await prisma.$queryRaw<Array<{
+        id: number;
+        latitude: number;
+        longitude: number;
+        issueType: string;
+        severity: number;
+    }>>`
+        SELECT 
+            id,
+            ST_Y(location) as latitude,
+            ST_X(location) as longitude,
+            "issueType", severity
+        FROM "Issue" 
+        WHERE status != 'RESOLVED'::"IssueStatus"
+        AND location IS NOT NULL
+    `;
 
     console.log(`Found ${activeIssues.length} active issues`);
 
     for (const issue of activeIssues) {
-        const basePenalty = ISSUE_PENALTY_MAP[issue.issueType] || 1.0;
+        const basePenalty = ISSUE_PENALTY_MAP[issue.issueType as IssueType] || 1.0;
         const severityMultiplier = issue.severity ? issue.severity / 3 : 1.0;
         const penalty = basePenalty * severityMultiplier;
         if (penalty <= 1.0) continue;
 
-        // Find nodes within search radius (using lat/lng index)
-        const nearbyNodes = await prisma.graphNode.findMany({
-            where: {
-                latitude: {
-                    gte: issue.latitude - SEARCH_RADIUS,
-                    lte: issue.latitude + SEARCH_RADIUS,
-                },
-                longitude: {
-                    gte: issue.longitude - SEARCH_RADIUS,
-                    lte: issue.longitude + SEARCH_RADIUS,
-                },
-            },
-            select: { id: true },
-        });
+        // Use PostGIS to find nearby nodes within search radius
+        const nearbyNodes = await prisma.$queryRaw<Array<{ id: string }>>`
+            SELECT gn.id
+            FROM "GraphNode" gn
+            WHERE ST_DWithin(
+                ST_SetSRID(ST_MakePoint(gn.longitude, gn.latitude), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(${issue.longitude}, ${issue.latitude}), 4326)::geography,
+                ${SEARCH_RADIUS * 111000} -- Convert degrees to meters (approx)
+            )
+        `;
 
         if (nearbyNodes.length === 0) continue;
 
         const nodeIds = nearbyNodes.map((n) => n.id);
 
         // Update edges connected to these nodes
-        // Use the higher penalty if multiple issues affect the same edge
         await prisma.graphEdge.updateMany({
             where: {
                 OR: [{ startNodeId: { in: nodeIds } }, { endNodeId: { in: nodeIds } }],
-                penalty: { lt: penalty }, // Only increase, never decrease
+                penalty: { lt: penalty },
             },
             data: { penalty },
         });

@@ -1,10 +1,11 @@
 import type { Request, Response } from "express";
+// Fix: import Prisma namespace from @prisma/client to avoid local path resolution issues
+import { Prisma } from "@prisma/client";
 import * as turf from "@turf/turf";
 import {
     createAuthenticatedIssue,
     createGuestIssue,
     getIssueById,
-    getIssuesByStatus,
     getIssuesByLocationBox,
     addIssueUpvote,
     removeIssueUpvote,
@@ -42,27 +43,63 @@ export async function getIssues(req: Request, res: Response) {
     try {
         const { type, status, showResolved } = req.query;
 
-        const where: Record<string, unknown> = {};
-
+        // Build dynamic WHERE clause parts (validated enum values only)
+        const conditions: string[] = ['i.location IS NOT NULL'];
+        
         if (type && typeof type === "string") {
-            where.issueType = type as IssueType;
+            conditions.push(`i."issueType" = '${type}'::"IssueType"`);
         }
 
         if (status && typeof status === "string") {
-            where.status = status as IssueStatus;
+            conditions.push(`i.status = '${status}'::"IssueStatus"`);
         } else if (showResolved !== "true") {
-            where.status = { not: IssueStatus.RESOLVED };
+            conditions.push(`i.status != 'RESOLVED'::"IssueStatus"`);
         }
 
-        const issues = await prisma.issue.findMany({
-            where,
-            orderBy: { createdAt: "desc" },
-            include: {
-                user: { select: { id: true, name: true } },
-                _count: { select: { upvotes: true, comments: true } },
-            },
-            take: 100,
-        });
+        const whereClause = conditions.length ? conditions.join(' AND ') : 'TRUE';
+
+        // Build full SQL string and execute with $queryRawUnsafe to avoid Prisma raw fragment issues
+        const sql = `
+            SELECT 
+                i.id, i.title, i."issueType", i.status, i.description,
+                ST_Y(i.location) AS latitude,
+                ST_X(i.location) AS longitude,
+                i."createdAt", i."userId", i."guestTokenId",
+                u.name AS user_name,
+                COALESCE(uv.upvote_count, 0) AS upvote_count,
+                COALESCE(cm.comment_count, 0) AS comment_count
+            FROM "Issue" i
+            LEFT JOIN "User" u ON i."userId" = u.id
+            LEFT JOIN (
+                SELECT "issueId", COUNT(*) AS upvote_count 
+                FROM "IssueUpvote" 
+                GROUP BY "issueId"
+            ) uv ON i.id = uv."issueId"
+            LEFT JOIN (
+                SELECT "issueId", COUNT(*) AS comment_count 
+                FROM "Comment" 
+                GROUP BY "issueId"
+            ) cm ON i.id = cm."issueId"
+            WHERE ${whereClause}
+            ORDER BY i."createdAt" DESC
+            LIMIT 100
+        `;
+
+        const issues = await prisma.$queryRawUnsafe(sql) as Array<{
+            id: number;
+            title: string;
+            issueType: string;
+            status: string;
+            description: string;
+            latitude: number;
+            longitude: number;
+            createdAt: Date;
+            userId: number;
+            guestTokenId: number | null;
+            user_name: string | null;
+            upvote_count: number;
+            comment_count: number;
+        }>;
 
         const formatted = issues.map((issue) => ({
             id: String(issue.id),
@@ -73,8 +110,8 @@ export async function getIssues(req: Request, res: Response) {
             location: `${issue.latitude}, ${issue.longitude}`,
             lat: issue.latitude,
             lng: issue.longitude,
-            voteCount: issue._count.upvotes,
-            commentCount: issue._count.comments,
+            voteCount: Number(issue.upvote_count),
+            commentCount: Number(issue.comment_count),
             reportedAt: issue.createdAt.toISOString(),
             reporterId: issue.guestTokenId ? undefined : String(issue.userId),
         }));
@@ -137,7 +174,7 @@ export async function getIssue(req: Request, res: Response) {
             commentCount: issue._count.comments,
             hasVoted,
             reportedAt: issue.createdAt.toISOString(),
-            reporter: issue.guestTokenId
+            reporter: issue.guestTokenId || !issue.user
                 ? { name: "Anonymous", isGuest: true }
                 : { id: String(issue.user.id), name: issue.user.name, email: issue.user.email },
         };
@@ -193,6 +230,11 @@ export async function createIssue(req: Request, res: Response) {
             issue = await createAuthenticatedIssue(title, description, latitude, longitude, issueType, req.user.id, imageBlobId);
         }
 
+        if (!issue) {
+            console.error("Issue creation returned null/undefined");
+            return res.status(500).json({ error: "Failed to create issue" });
+        }
+
         recalculatePenalties().catch((err) =>
             console.error("Failed to recalculate penalties:", err)
         );
@@ -243,15 +285,22 @@ export async function voteOnIssue(req: Request, res: Response) {
             return res.status(404).json({ error: "Issue not found" });
         }
 
-        // Geofencing check - users must be within 5km of the issue
+        // PostGIS-based geofencing check - users must be within 5km of the issue
         const { userLat, userLng } = req.body;
         if (userLat === undefined || userLng === undefined) {
             return res.status(400).json({ error: "Location required to vote. Please enable location access." });
         }
-        const userPoint = turf.point([userLng, userLat]);
-        const issuePoint = turf.point([issue.longitude, issue.latitude]);
-        const distance = turf.distance(userPoint, issuePoint, { units: "kilometers" });
-        if (distance > 5) {
+
+        // Use PostGIS to check distance instead of turf.js
+        const distanceCheck = await prisma.$queryRaw<{ distance_meters: number }[]>`
+            SELECT ST_Distance(
+                ST_SetSRID(ST_MakePoint(${issue.longitude}, ${issue.latitude}), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(${userLng}, ${userLat}), 4326)::geography
+            ) as distance_meters
+        `;
+
+        const distance = distanceCheck[0]?.distance_meters || Infinity;
+        if (distance > 5000) { // 5km in meters
             return res.status(403).json({ error: "You must be within 5km of the issue to vote." });
         }
 

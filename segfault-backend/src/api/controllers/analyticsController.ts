@@ -151,24 +151,44 @@ export async function getHeatmap(req: Request, res: Response) {
             return res.status(400).json({ error: "Invalid bounds parameters" });
         }
 
-        const issues = await prisma.issue.findMany({
-            where: {
-                latitude: { gte: minLat, lte: maxLat },
-                longitude: { gte: minLng, lte: maxLng },
-                status: { not: IssueStatus.RESOLVED },
-            },
-            select: {
-                latitude: true,
-                longitude: true,
-                severity: true,
-                createdAt: true,
-                _count: { select: { upvotes: true, comments: true } },
-            },
-        });
+        // Use PostGIS query to get issues with coordinates
+        const issues = await prisma.$queryRaw<Array<{
+            latitude: number;
+            longitude: number;
+            severity: number | null;
+            createdAt: Date;
+            upvote_count: bigint;
+            comment_count: bigint;
+        }>>`
+            SELECT 
+                ST_Y(i.location) as latitude,
+                ST_X(i.location) as longitude,
+                i.severity,
+                i."createdAt",
+                COALESCE(uv.upvote_count, 0) as upvote_count,
+                COALESCE(cm.comment_count, 0) as comment_count
+            FROM "Issue" i
+            LEFT JOIN (
+                SELECT "issueId", COUNT(*) as upvote_count 
+                FROM "IssueUpvote" 
+                GROUP BY "issueId"
+            ) uv ON i.id = uv."issueId"
+            LEFT JOIN (
+                SELECT "issueId", COUNT(*) as comment_count 
+                FROM "Comment" 
+                GROUP BY "issueId"
+            ) cm ON i.id = cm."issueId"
+            WHERE ST_Within(
+                i.location,
+                ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)
+            )
+            AND i.status != 'RESOLVED'::"IssueStatus"
+            AND i.location IS NOT NULL
+        `;
 
         const heatmapData = issues.map((issue) => {
             const hoursSinceCreation = (Date.now() - issue.createdAt.getTime()) / (1000 * 60 * 60);
-            const urgencyScore = Math.min(100, hoursSinceCreation * 0.5 + issue._count.upvotes * 2 + issue._count.comments);
+            const urgencyScore = Math.min(100, hoursSinceCreation * 0.5 + Number(issue.upvote_count) * 2 + Number(issue.comment_count));
             const severity = issue.severity || 3;
             const weight = severity * 0.3 + (urgencyScore / 100) * 0.7;
 
@@ -195,22 +215,29 @@ export async function exportData(req: Request, res: Response) {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        const issues = await prisma.issue.findMany({
-            where: { userId },
-            select: {
-                id: true,
-                title: true,
-                description: true,
-                issueType: true,
-                status: true,
-                latitude: true,
-                longitude: true,
-                createdAt: true,
-                updatedAt: true,
-                severity: true,
-            },
-            orderBy: { createdAt: "desc" },
-        });
+        // Use PostGIS query to get user's issues with coordinates
+        const issues = await prisma.$queryRaw<Array<{
+            id: number;
+            title: string;
+            description: string;
+            issueType: string;
+            status: string;
+            latitude: number;
+            longitude: number;
+            createdAt: Date;
+            updatedAt: Date;
+            severity: number | null;
+        }>>`
+            SELECT 
+                i.id, i.title, i.description, i."issueType", i.status,
+                ST_Y(i.location) as latitude,
+                ST_X(i.location) as longitude,
+                i."createdAt", i."updatedAt", i.severity
+            FROM "Issue" i
+            WHERE i."userId" = ${userId}
+            AND i.location IS NOT NULL
+            ORDER BY i."createdAt" DESC
+        `;
 
         const exportData = issues.map((issue) => ({
             id: issue.id,

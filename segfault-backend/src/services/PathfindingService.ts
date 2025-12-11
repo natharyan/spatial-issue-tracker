@@ -271,7 +271,7 @@ export async function findPath(
 
     console.log(`Start node: ${startNode.id}, End node: ${endNode.id}`);
 
-    // Step 2: Load graph into memory
+    // Step 2: Load graph into memory and get active issues using PostGIS
     const [allNodes, allEdges, activeIssues] = await Promise.all([
         prisma.graphNode.findMany({
             select: { id: true, latitude: true, longitude: true },
@@ -279,10 +279,21 @@ export async function findPath(
         prisma.graphEdge.findMany({
             select: { id: true, startNodeId: true, endNodeId: true, distance: true, baseCost: true, penalty: true },
         }),
-        prisma.issue.findMany({
-            where: { status: { not: IssueStatus.RESOLVED } },
-            select: { latitude: true, longitude: true, issueType: true, severity: true }
-        })
+        // Use PostGIS to get issue locations
+        prisma.$queryRaw<Array<{
+            latitude: number;
+            longitude: number;
+            issueType: string;
+            severity: number;
+        }>>`
+            SELECT 
+                ST_Y(location) as latitude,
+                ST_X(location) as longitude,
+                "issueType", severity
+            FROM "Issue" 
+            WHERE status != 'RESOLVED'::"IssueStatus"
+            AND location IS NOT NULL
+        `
     ]);
 
     console.log(`Loaded ${allNodes.length} nodes, ${allEdges.length} edges, and ${activeIssues.length} active issues`);
@@ -294,26 +305,31 @@ export async function findPath(
     }
 
     // Apply dynamic penalties to edges
-    // For each issue, find nearby edges (e.g., within 50 meters) and increase their penalty
-    const issueRadius = 0.0005; // approx 50m
+    // For each issue, find nearby edges using PostGIS instead of manual coordinate filtering
+    const issueRadius = 50; // 50 meters
 
     // We update the 'penalty' in the edge objects in memory
     for (const issue of activeIssues) {
-        // Find nodes near issue
-        const nearbyNodes = allNodes.filter(n =>
-            Math.abs(n.latitude - issue.latitude) < issueRadius &&
-            Math.abs(n.longitude - issue.longitude) < issueRadius
-        );
+        // Use PostGIS to find nodes near each issue (within 50 meters)
+        const nearbyNodes = await prisma.$queryRaw<Array<{ id: string }>>`
+            SELECT gn.id
+            FROM "GraphNode" gn
+            WHERE ST_DWithin(
+                ST_SetSRID(ST_MakePoint(gn.longitude, gn.latitude), 4326)::geography,
+                ST_SetSRID(ST_MakePoint(${issue.longitude}, ${issue.latitude}), 4326)::geography,
+                ${issueRadius}
+            )
+        `;
+
         const nearbyNodeIds = new Set(nearbyNodes.map(n => n.id));
 
         // Find edges connected to these nodes
         for (const edge of allEdges) {
             if (nearbyNodeIds.has(edge.startNodeId) || nearbyNodeIds.has(edge.endNodeId)) {
                 // Calculate penalty based on severity (1-5)
-                // Default to 1 if not specified
                 // Formula: Multiplier = 1 + (Severity * 2)
                 // Severity 1 => 3x cost
-                // Severity 3 => 7x cost
+                // Severity 3 => 7x cost  
                 // Severity 5 => 11x cost (Avoid at all costs)
                 const severity = issue.severity || 1;
                 const multiplier = 1 + (severity * 2);

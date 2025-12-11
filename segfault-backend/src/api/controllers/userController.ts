@@ -55,30 +55,55 @@ export async function getMe(req: Request, res: Response) {
 
 export async function getMyIssues(req: Request, res: Response) {
     try {
-        if (!req.user || req.user.id === -1) {
+        const userId = req.user?.id;
+        if (!userId) {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        const issues = await prisma.issue.findMany({
-            where: { userId: req.user.id },
-            orderBy: { createdAt: 'desc' },
-            include: {
-                _count: { select: { upvotes: true, comments: true } }
-            }
-        });
+        const issues = await prisma.$queryRaw<Array<{
+            id: number;
+            title: string;
+            issueType: string;
+            status: string;
+            latitude: number;
+            longitude: number;
+            createdAt: Date;
+            upvote_count: bigint;
+            comment_count: bigint;
+        }>>`
+            SELECT 
+                i.id, i.title, i."issueType", i.status,
+                ST_Y(i.location) as latitude,
+                ST_X(i.location) as longitude,
+                i."createdAt",
+                COALESCE(uv.upvote_count, 0) as upvote_count,
+                COALESCE(cm.comment_count, 0) as comment_count
+            FROM "Issue" i
+            LEFT JOIN (
+                SELECT "issueId", COUNT(*) as upvote_count 
+                FROM "IssueUpvote" 
+                GROUP BY "issueId"
+            ) uv ON i.id = uv."issueId"
+            LEFT JOIN (
+                SELECT "issueId", COUNT(*) as comment_count 
+                FROM "Comment" 
+                GROUP BY "issueId"
+            ) cm ON i.id = cm."issueId"
+            WHERE i."userId" = ${userId}
+            AND i.location IS NOT NULL
+            ORDER BY i."createdAt" DESC
+        `;
 
-        // Format similarly to issueController
         const formatted = issues.map((issue) => ({
             id: String(issue.id),
             title: issue.title,
             type: issue.issueType,
             status: issue.status,
-            description: issue.description,
             location: `${issue.latitude}, ${issue.longitude}`,
             lat: issue.latitude,
             lng: issue.longitude,
-            voteCount: issue._count.upvotes,
-            commentCount: issue._count.comments,
+            voteCount: Number(issue.upvote_count),
+            commentCount: Number(issue.comment_count),
             reportedAt: issue.createdAt.toISOString(),
         }));
 

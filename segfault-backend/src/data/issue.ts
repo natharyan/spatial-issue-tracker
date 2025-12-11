@@ -12,22 +12,18 @@ export async function createAuthenticatedIssue(
 	userId: number,
 	imageBlobId?: string,
 ) {
-	const issue = await prisma.issue.create({
-		data: {
-			title,
-			description,
-			latitude,
-			longitude,
-			issueType,
-			userId,
-			imageBlobId: imageBlobId ?? null,
-			// Production: issues require moderation queue before becoming visible
-			authorized: IssueAuthorized.FALSE,
-			error: IssueError.PENDING,
-		},
-	});
+	// Use SQL to insert with PostGIS geometry
+	const result = await prisma.$queryRaw<{ id: number }[]>`
+		INSERT INTO "Issue" (title, description, location, "issueType", "userId", "imageBlobId", authorized, error, "createdAt")
+		VALUES (${title}, ${description}, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${issueType}::"IssueType", ${userId}, ${imageBlobId}, 'FALSE'::"IssueAuthorized", 'PENDING'::"IssueError", NOW())
+		RETURNING id
+	`;
 
-	return issue;
+	const issueId = result[0]?.id;
+	if (!issueId) throw new Error("Failed to create issue");
+
+	// Fetch the created issue for return
+	return getIssueById(issueId);
 }
 
 export async function createGuestIssue(
@@ -38,26 +34,17 @@ export async function createGuestIssue(
 	issueType: IssueType,
 	guestTokenId: number,
 	imageBlobId?: string,
-	// All "invalid" users get assigned to userId -1. This is required by the schema, so added here.
-	// If guest token id is NOT null, then ignore the userID field
 ) {
-	const issue = await prisma.issue.create({
-		data: {
-			title,
-			description,
-			latitude,
-			longitude,
-			issueType,
-			guestTokenId,
-			userId: -1,
-			imageBlobId: imageBlobId ?? null,
-			// Production: issues require moderation queue before becoming visible
-			authorized: IssueAuthorized.FALSE,
-			error: IssueError.PENDING,
-		},
-	});
+	const result = await prisma.$queryRaw<{ id: number }[]>`
+		INSERT INTO "Issue" (title, description, location, "issueType", "guestTokenId", "userId", "imageBlobId", authorized, error, "createdAt")
+		VALUES (${title}, ${description}, ST_SetSRID(ST_MakePoint(${longitude}, ${latitude}), 4326), ${issueType}::"IssueType", ${guestTokenId}, -1, ${imageBlobId}, 'FALSE'::"IssueAuthorized", 'PENDING'::"IssueError", NOW())
+		RETURNING id
+	`;
 
-	return issue;
+	const issueId = result[0]?.id;
+	if (!issueId) throw new Error("Failed to create issue");
+
+	return getIssueById(issueId);
 }
 
 export async function updateIssueImage(issueId: number, imageBlobId: string) {
@@ -101,19 +88,73 @@ export async function deleteIssue(issueId: number) {
 
 // Issue Retrieval (Filtering and Map)
 export async function getIssueById(issueId: number) {
-	const issue = await prisma.issue.findUnique({
-		where: { id: issueId },
-		include: {
-			user: { select: { id: true, name: true, email: true } },
-			guestToken: { select: { id: true, token: true } },
-			_count: { select: { upvotes: true, comments: true } },
-		},
-	});
+	// Use raw SQL to extract lat/lng from PostGIS geometry
+	const issues = await prisma.$queryRaw<Array<{
+		id: number;
+		title: string;
+		description: string;
+		latitude: number;
+		longitude: number;
+		status: string;
+		authorized: string;
+		error: string;
+		createdAt: Date;
+		updatedAt: Date;
+		imageBlobId: string | null;
+		severity: number | null;
+		userId: number;
+		guestTokenId: number | null;
+		issueType: string;
+		user_id: number | null;
+		user_name: string | null;
+		user_email: string | null;
+		upvote_count: number;
+		comment_count: number;
+	}>>`
+		SELECT 
+			i.id, i.title, i.description,
+			ST_Y(i.location) as latitude,
+			ST_X(i.location) as longitude,
+			i.status, i.authorized, i.error, i."createdAt", i."updatedAt",
+			i."imageBlobId", i.severity, i."userId", i."guestTokenId", i."issueType",
+			u.id as user_id, u.name as user_name, u.email as user_email,
+			COALESCE(upvote_count, 0) as upvote_count,
+			COALESCE(comment_count, 0) as comment_count
+		FROM "Issue" i
+		LEFT JOIN "User" u ON i."userId" = u.id
+		LEFT JOIN (
+			SELECT "issueId", COUNT(*) as upvote_count 
+			FROM "IssueUpvote" 
+			GROUP BY "issueId"
+		) uv ON i.id = uv."issueId"
+		LEFT JOIN (
+			SELECT "issueId", COUNT(*) as comment_count 
+			FROM "Comment" 
+			GROUP BY "issueId"
+		) cm ON i.id = cm."issueId"
+		WHERE i.id = ${issueId}
+	`;
 
-	return issue;
+	const issue = issues[0];
+	if (!issue) return null;
+
+	// Format to match expected return type
+	return {
+		...issue,
+		_count: {
+			upvotes: issue.upvote_count,
+			comments: issue.comment_count,
+		},
+		user: issue.user_id ? {
+			id: issue.user_id,
+			name: issue.user_name,
+			email: issue.user_email,
+		} : null,
+		guestToken: issue.guestTokenId ? { id: issue.guestTokenId, token: "hidden" } : null,
+	};
 }
 
-// TODO: Change this to use postGIS (done)
+// Updated location-based search using PostGIS
 export async function getIssuesByLocationBox(
 	minLat: number,
 	maxLat: number,
@@ -121,32 +162,114 @@ export async function getIssuesByLocationBox(
 	maxLng: number,
 	filters?: { type?: IssueType; status?: IssueStatus }
 ) {
-	return await prisma.issue.findMany({
-		where: {
-			latitude: { gte: minLat, lte: maxLat },
-			longitude: { gte: minLng, lte: maxLng },
-			...(filters?.type && { issueType: filters.type }),
-			...(filters?.status && { status: filters.status }),
-		},
-		include: {
-			_count: { select: { upvotes: true, comments: true } },
-		},
-		orderBy: { createdAt: "desc" },
-	});
+	let typeFilter = '';
+	let statusFilter = '';
+	
+	if (filters?.type) {
+		typeFilter = `AND i."issueType" = ${filters.type}::"IssueType"`;
+	}
+	
+	if (filters?.status) {
+		statusFilter = `AND i.status = ${filters.status}::"IssueStatus"`;
+	}
+
+	const issues = await prisma.$queryRaw<Array<{
+		id: number;
+		title: string;
+		description: string;
+		latitude: number;
+		longitude: number;
+		status: string;
+		issueType: string;
+		createdAt: Date;
+		upvote_count: number;
+		comment_count: number;
+	}>>`
+		SELECT 
+			i.id, i.title, i.description,
+			ST_Y(i.location) as latitude,
+			ST_X(i.location) as longitude,
+			i.status, i."issueType", i."createdAt",
+			COALESCE(upvote_count, 0) as upvote_count,
+			COALESCE(comment_count, 0) as comment_count
+		FROM "Issue" i
+		LEFT JOIN (
+			SELECT "issueId", COUNT(*) as upvote_count 
+			FROM "IssueUpvote" 
+			GROUP BY "issueId"
+		) uv ON i.id = uv."issueId"
+		LEFT JOIN (
+			SELECT "issueId", COUNT(*) as comment_count 
+			FROM "Comment" 
+			GROUP BY "issueId"
+		) cm ON i.id = cm."issueId"
+		WHERE ST_Within(
+			i.location,
+			ST_MakeEnvelope(${minLng}, ${minLat}, ${maxLng}, ${maxLat}, 4326)
+		)
+		${typeFilter}
+		${statusFilter}
+		ORDER BY i."createdAt" DESC
+	`;
+
+	return issues.map(issue => ({
+		...issue,
+		_count: {
+			upvotes: issue.upvote_count,
+			comments: issue.comment_count,
+		}
+	}));
 }
 
-export async function getIssuesByStatus(status: IssueStatus) {
-	const issues = await prisma.issue.findMany({ where: { status }, orderBy: { createdAt: 'desc' } });
-	return issues;
-}
+// Add new function for distance-based queries (e.g., "issues within 5km")
+export async function getIssuesWithinDistance(
+	centerLat: number,
+	centerLng: number,
+	distanceMeters: number,
+	filters?: { type?: IssueType; status?: IssueStatus }
+) {
+	let typeFilter = '';
+	let statusFilter = '';
+	
+	if (filters?.type) {
+		typeFilter = `AND i."issueType" = ${filters.type}::"IssueType"`;
+	}
+	
+	if (filters?.status) {
+		statusFilter = `AND i.status = ${filters.status}::"IssueStatus"`;
+	}
 
-export async function getIssuesByUser(userId: number) {
-	const issues = await prisma.issue.findMany({ where: { userId }, orderBy: { createdAt: 'desc' } });
-	return issues;
-}
+	const issues = await prisma.$queryRaw<Array<{
+		id: number;
+		title: string;
+		description: string;
+		latitude: number;
+		longitude: number;
+		distance_meters: number;
+		status: string;
+		issueType: string;
+		createdAt: Date;
+	}>>`
+		SELECT 
+			i.id, i.title, i.description,
+			ST_Y(i.location) as latitude,
+			ST_X(i.location) as longitude,
+			ST_Distance(
+				i.location::geography,
+				ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography
+			) as distance_meters,
+			i.status, i."issueType", i."createdAt"
+		FROM "Issue" i
+		WHERE ST_DWithin(
+			i.location::geography,
+			ST_SetSRID(ST_MakePoint(${centerLng}, ${centerLat}), 4326)::geography,
+			${distanceMeters}
+		)
+		${typeFilter}
+		${statusFilter}
+		ORDER BY distance_meters ASC
+	`;
 
-export async function getIssuesByGuestToken(guestTokenId: number) {
-	const issues = await prisma.issue.findMany({ where: { guestTokenId }, orderBy: { createdAt: 'desc' } });
 	return issues;
 }
 
@@ -243,6 +366,81 @@ export async function removeCommentUpvote(userId: number, commentId: number) {
 	return res.count > 0;
 }
 
+export async function getIssuesByUser(userId: number) {
+	const issues = await prisma.$queryRaw<Array<{
+		id: number;
+		title: string;
+		description: string;
+		latitude: number;
+		longitude: number;
+		status: string;
+		issueType: string;
+		createdAt: Date;
+		imageBlobId: string | null;
+	}>>`
+		SELECT 
+			i.id, i.title, i.description,
+			ST_Y(i.location) as latitude,
+			ST_X(i.location) as longitude,
+			i.status, i."issueType", i."createdAt", i."imageBlobId"
+		FROM "Issue" i
+		WHERE i."userId" = ${userId}
+		AND i.location IS NOT NULL
+		ORDER BY i."createdAt" DESC
+	`;
+	return issues;
+}
+
+export async function getIssuesByStatus(status: IssueStatus) {
+	const issues = await prisma.$queryRaw<Array<{
+		id: number;
+		title: string;
+		description: string;
+		latitude: number;
+		longitude: number;
+		status: string;
+		issueType: string;
+		createdAt: Date;
+		imageBlobId: string | null;
+	}>>`
+		SELECT 
+			i.id, i.title, i.description,
+			ST_Y(i.location) as latitude,
+			ST_X(i.location) as longitude,
+			i.status, i."issueType", i."createdAt", i."imageBlobId"
+		FROM "Issue" i
+		WHERE i.status = ${status}::"IssueStatus"
+		AND i.location IS NOT NULL
+		ORDER BY i."createdAt" DESC
+	`;
+	return issues;
+}
+
+export async function getIssuesByGuestToken(guestTokenId: number) {
+	const issues = await prisma.$queryRaw<Array<{
+		id: number;
+		title: string;
+		description: string;
+		latitude: number;
+		longitude: number;
+		status: string;
+		issueType: string;
+		createdAt: Date;
+		imageBlobId: string | null;
+	}>>`
+		SELECT 
+			i.id, i.title, i.description,
+			ST_Y(i.location) as latitude,
+			ST_X(i.location) as longitude,
+			i.status, i."issueType", i."createdAt", i."imageBlobId"
+		FROM "Issue" i
+		WHERE i."guestTokenId" = ${guestTokenId}
+		AND i.location IS NOT NULL
+		ORDER BY i."createdAt" DESC
+	`;
+	return issues;
+}
+
 export default {
 	createAuthenticatedIssue,
 	createGuestIssue,
@@ -253,6 +451,7 @@ export default {
 	deleteIssue,
 	getIssueById,
 	getIssuesByLocationBox,
+	getIssuesWithinDistance,
 	getIssuesByStatus,
 	getIssuesByUser,
 	getIssuesByGuestToken,

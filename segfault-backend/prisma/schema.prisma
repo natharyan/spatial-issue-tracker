@@ -68,8 +68,7 @@ model Issue {
   id          Int          @id @default(autoincrement())
   title       String
   description String
-  latitude    Float
-  longitude   Float
+  location    Unsupported("geometry(Point, 4326)")?
   status      IssueStatus  @default(PENDING)
   authorized   IssueAuthorized @default(FALSE)
   error       IssueError   @default(PENDING)
@@ -93,7 +92,7 @@ model Issue {
 
   @@index([issueType])
   @@index([userId])
-  @@index([latitude, longitude])
+  // PostGIS GIST index is created via raw SQL migration
 }
 
 enum IssueStatus {
