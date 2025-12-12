@@ -17,6 +17,7 @@ const Dashboard = () => {
     const [reportFormOpen, setReportFormOpen] = useState(false);
     const [detailDrawerOpen, setDetailDrawerOpen] = useState(false);
     const [selectedIssueId, setSelectedIssueId] = useState<string | null>(null);
+    const [flyToLocation, setFlyToLocation] = useState<{ lat: number; lng: number } | null>(null);
 
     const [filters, setFilters] = useState<FilterState>({
         issueType: '',
@@ -52,6 +53,15 @@ const Dashboard = () => {
         if (!showRouting && activeTab !== 0) {
             setActiveTab(0);
         }
+    };
+
+    const handleFindOnMap = (lat: number, lng: number) => {
+        // Close the detail drawer
+        setDetailDrawerOpen(false);
+        // Switch to map tab
+        setActiveTab(0);
+        // Set the fly-to location (use a new object to trigger useEffect even if same coords)
+        setFlyToLocation({ lat, lng });
     };
 
     return (
@@ -113,6 +123,7 @@ const Dashboard = () => {
                     filters={filters}
                     showRouting={showRouting}
                     onToggleRouting={setShowRouting}
+                    flyToLocation={flyToLocation}
                 />
             )}
             {activeTab === 1 && <IssuesList onIssueClick={handlePinClick} />}
@@ -148,6 +159,7 @@ const Dashboard = () => {
                 open={detailDrawerOpen}
                 onClose={handleDetailClose}
                 issueId={selectedIssueId}
+                onFindOnMap={handleFindOnMap}
             />
         </DashboardLayout>
     );

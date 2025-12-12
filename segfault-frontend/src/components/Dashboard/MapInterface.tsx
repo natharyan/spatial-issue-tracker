@@ -31,6 +31,7 @@ interface MapInterfaceProps {
     filters?: FilterState;
     showRouting?: boolean;
     onToggleRouting?: (show: boolean) => void;
+    flyToLocation?: { lat: number; lng: number } | null;
 }
 
 // Default center (Delhi, India - can be changed to any default location)
@@ -55,7 +56,7 @@ const RoutePointSelector = ({
     return null;
 };
 
-const MapInterface = ({ onPinClick, filters, showRouting: propShowRouting, onToggleRouting }: MapInterfaceProps) => {
+const MapInterface = ({ onPinClick, filters, showRouting: propShowRouting, onToggleRouting, flyToLocation }: MapInterfaceProps) => {
     const [issues, setIssues] = useState<MapIssue[]>([]);
     const [viewMode, setViewMode] = useState<VisualizationMode>("status");
     const [userLocation, setUserLocation] = useState<[number, number] | null>(null);
@@ -98,6 +99,15 @@ const MapInterface = ({ onPinClick, filters, showRouting: propShowRouting, onTog
             );
         }
     }, []);
+
+    // Fly to location when flyToLocation prop changes
+    useEffect(() => {
+        if (flyToLocation && mapRef.current) {
+            mapRef.current.flyTo([flyToLocation.lat, flyToLocation.lng], 17, {
+                duration: 1.5,
+            });
+        }
+    }, [flyToLocation]);
 
     // Fetch issues when bounds change
     const fetchIssues = useCallback(async (bounds: Bounds) => {

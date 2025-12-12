@@ -24,6 +24,8 @@ export interface Issue {
     status: string;
     urgency: string;
     location: string;
+    lat?: number;
+    lng?: number;
     description: string;
     voteCount: number;
     reportedAt: string;
