@@ -103,7 +103,7 @@ const MapInterface = ({ onPinClick, filters, showRouting: propShowRouting, onTog
     // Fly to location when flyToLocation prop changes
     useEffect(() => {
         if (flyToLocation && mapRef.current) {
-            mapRef.current.flyTo([flyToLocation.lat, flyToLocation.lng], 17, {
+            mapRef.current.flyTo([flyToLocation.lat, flyToLocation.lng], 50, {
                 duration: 1.5,
             });
         }

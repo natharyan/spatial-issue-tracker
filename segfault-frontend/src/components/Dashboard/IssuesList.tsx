@@ -194,17 +194,27 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
             <Box sx={{ display: 'flex', gap: 2, mb: 3, flexWrap: 'wrap', alignItems: 'center' }}>
                 <TextField
                     size="small"
-                    placeholder="Search issues..."
+                    placeholder="Search by keyword..."
                     value={searchQuery}
                     onChange={(e) => setSearchQuery(e.target.value)}
                     InputProps={{
                         startAdornment: (
                             <InputAdornment position="start">
-                                <SearchIcon />
+                                <SearchIcon sx={{ color: '#94a3b8' }} />
                             </InputAdornment>
                         ),
                     }}
-                    sx={{ minWidth: 200, flex: 1 }}
+                    sx={{
+                        minWidth: 200,
+                        flex: 1,
+                        '& .MuiInputBase-input': {
+                            color: '#f8fafc',
+                        },
+                        '& .MuiInputBase-input::placeholder': {
+                            color: '#94a3b8',
+                            opacity: 1,
+                        },
+                    }}
                 />
                 <FormControl size="small" sx={{ minWidth: 140 }}>
                     <InputLabel>Type</InputLabel>
