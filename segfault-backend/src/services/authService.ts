@@ -165,42 +165,53 @@ export async function registerWithEmail(email: string, password: string, name: s
     const hashedPassword = await bcrypt.hash(password, 10);
     const user = await createNewUser(email, hashedPassword, name, role as any, null);
 
-    // trigger 2FA
-    const code = Math.floor(100000 + Math.random() * 900000).toString();
-    const redisKey = `2fa:${user.id}`;
-    await redisClient.set(redisKey, code, 'EX', 600); // 10 mins
+    // Auto verify user (Skipping 2FA)
+    const { prisma } = await import("../data/prisma/prismaClient");
+    await prisma.user.update({ where: { id: user.id }, data: { emailVerified: true } });
 
-    await sendVerificationEmail(email, code);
+    const tokenPayload = {
+        userId: user.id,
+        role: (user as any).role,
+        name: user.name || null,
+        email: user.email,
+        picture: null,
+        isGov: (user as any).role === 'PIGS' || isGov,
+    };
+    const token = jwt.sign(tokenPayload, JWT.SECRET, { expiresIn: '7d' });
 
-    return { require2fa: true, userId: user.id };
+    const key = `session:${token}`;
+    const value = JSON.stringify({ userId: user.id, role: (user as any).role });
+    const expirySeconds = 60 * 60 * 24 * 7;
+
+    await redisClient.set(key, value, 'EX', expirySeconds);
+
+    return token;
 }
 
 export async function loginWithEmail(email: string, password: string) {
+    console.log(`[Auth] Attempting login for email: ${email}`);
+    
     const user = await getUserByEmail(email);
     if (!user) {
+        console.log(`[Auth] No user found with email: ${email}`);
         throw new Error("Invalid email or password");
     }
 
+    console.log(`[Auth] User found: id=${user.id}, hasPassword=${!!user.password}`);
+
     if (!user.password) {
+        console.log(`[Auth] User has no password (likely Google OAuth account)`);
         throw new Error("This account uses Google sign-in");
     }
 
     const isValid = await bcrypt.compare(password, user.password);
+    console.log(`[Auth] Password comparison result: ${isValid}`);
+    
     if (!isValid) {
         throw new Error("Invalid email or password");
     }
 
-    // CHECK IF VERIFIED
-    if (!(user as any).emailVerified) {
-        // Generate and send code
-        const code = Math.floor(100000 + Math.random() * 900000).toString();
-        const redisKey = `2fa:${user.id}`;
-        await redisClient.set(redisKey, code, 'EX', 600); // 10 mins
-
-        await sendVerificationEmail(email, code);
-
-        return { require2fa: true, userId: user.id };
-    }
+    // 2FA Removed: Proceed directly to token generation
 
     const tokenPayload = {
         userId: user.id,
@@ -278,8 +289,6 @@ export async function generateGuestSession() {
 
     return { token, guestTokenId: guestRecord.id };
 }
-
-// ... existing code
 
 export async function changeUserPassword(userId: number, oldPass: string, newPass: string): Promise<boolean> {
     const { prisma } = await import("../data/prisma/prismaClient");
