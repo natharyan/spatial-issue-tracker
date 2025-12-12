@@ -5,7 +5,7 @@ import { prisma } from "../../data/prisma/prismaClient";
 
 export interface AuthUser {
     id: number;
-    role: "USER" | "ADMIN" | "GUEST";
+    role: "USER" | "ADMIN" | "GUEST" | "PIGS";
     email?: string;
     guestTokenId?: number;
 }

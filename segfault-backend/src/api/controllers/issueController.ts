@@ -46,7 +46,7 @@ export async function getIssues(req: Request, res: Response) {
 
         // Build dynamic WHERE clause parts (validated enum values only)
         const conditions: string[] = ['i.location IS NOT NULL'];
-        
+
         if (type && typeof type === "string") {
             conditions.push(`i."issueType" = '${type}'::"IssueType"`);
         }
@@ -441,7 +441,7 @@ export async function updateIssueStatus(req: Request, res: Response) {
             return res.status(401).json({ error: "Authentication required" });
         }
 
-        if (req.user.role !== "ADMIN") {
+        if (req.user.role !== "ADMIN" && req.user.role !== "PIGS") {
             return res.status(403).json({ error: "Admin access required" });
         }
 

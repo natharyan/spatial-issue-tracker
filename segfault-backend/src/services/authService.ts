@@ -211,8 +211,6 @@ export async function loginWithEmail(email: string, password: string) {
         throw new Error("Invalid email or password");
     }
 
-    // 2FA Removed: Proceed directly to token generation
-
     const tokenPayload = {
         userId: user.id,
         role: (user as any).role,
