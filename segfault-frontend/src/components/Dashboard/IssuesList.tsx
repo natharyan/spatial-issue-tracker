@@ -50,7 +50,7 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
     const [typeFilter, setTypeFilter] = useState('');
     const [statusFilter, setStatusFilter] = useState('');
     const [searchQuery, setSearchQuery] = useState('');
-    const [sortBy, setSortBy] = useState<'votes' | 'date' | 'location'>('date');
+    const [sortBy, setSortBy] = useState<'votes' | 'date' | 'location'>('votes');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
 
     useEffect(() => {
