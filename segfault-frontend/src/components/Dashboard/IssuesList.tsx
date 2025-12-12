@@ -15,9 +15,12 @@ import {
     CircularProgress,
     Alert,
     Tooltip,
+    Menu,
 } from '@mui/material';
 import ThumbUpOutlinedIcon from '@mui/icons-material/ThumbUpOutlined';
 import CheckCircleIcon from '@mui/icons-material/CheckCircle';
+import PlayArrowIcon from '@mui/icons-material/PlayArrow';
+import MoreVertIcon from '@mui/icons-material/MoreVert';
 import LocationOnIcon from '@mui/icons-material/LocationOn';
 import AccessTimeIcon from '@mui/icons-material/AccessTime';
 import SearchIcon from '@mui/icons-material/Search';
@@ -51,6 +54,9 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
     const [searchQuery, setSearchQuery] = useState('');
     const [sortBy, setSortBy] = useState<'votes' | 'date' | 'location'>('votes');
     const [sortOrder, setSortOrder] = useState<'asc' | 'desc'>('desc');
+
+    // Status menu state for gov/admin users
+    const [statusMenuAnchor, setStatusMenuAnchor] = useState<{ el: HTMLElement; issueId: string } | null>(null);
 
     useEffect(() => {
         fetchIssues();
@@ -108,9 +114,19 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
         );
     };
 
-    const handleMarkResolved = async (issueId: string, e: React.MouseEvent) => {
+    const handleStatusMenuOpen = (e: React.MouseEvent<HTMLElement>, issueId: string) => {
         e.stopPropagation();
-        if (!isGov) return;
+        setStatusMenuAnchor({ el: e.currentTarget, issueId });
+    };
+
+    const handleStatusMenuClose = () => {
+        setStatusMenuAnchor(null);
+    };
+
+    const handleStatusChange = async (status: 'IN_PROGRESS' | 'RESOLVED') => {
+        if (!statusMenuAnchor || !isGov) return;
+        const issueId = statusMenuAnchor.issueId;
+        handleStatusMenuClose();
         try {
             await fetch(`${import.meta.env.VITE_API_URL || 'http://localhost:3000'}/issues/${issueId}/status`, {
                 method: 'PATCH',
@@ -118,18 +134,20 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
                     'Content-Type': 'application/json',
                     'Authorization': `Bearer ${localStorage.getItem('authToken')}`,
                 },
-                body: JSON.stringify({ status: 'RESOLVED' }),
+                body: JSON.stringify({ status }),
                 credentials: 'include',
             });
             fetchIssues();
         } catch (err) {
-            console.error('Failed to mark resolved:', err);
+            console.error('Failed to update status:', err);
         }
     };
 
     const getStatusColor = (status: string) => {
         switch (status?.toLowerCase()) {
-            case 'pending': return 'warning';
+            case 'pending':
+            case 'open':
+                return 'warning';
             case 'in_progress': return 'info';
             case 'resolved': return 'success';
             default: return 'default';
@@ -219,7 +237,7 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
             {/* Gov Badge */}
             {isGov && (
                 <Alert severity="info" sx={{ mb: 2 }}>
-                    <strong>Government Official Mode:</strong> You can mark issues as resolved directly.
+                    <strong>Government Official Mode:</strong> You can change issue status using the menu on each issue.
                 </Alert>
             )}
 
@@ -285,14 +303,14 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
                                         </Box>
                                         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1 }}>
                                             {isGov ? (
-                                                <Tooltip title="Mark as Resolved">
+                                                <Tooltip title="Change Status">
                                                     <IconButton
                                                         size="small"
-                                                        onClick={(e) => handleMarkResolved(issue.id, e)}
+                                                        onClick={(e) => handleStatusMenuOpen(e, issue.id)}
                                                         disabled={issue.status === 'RESOLVED'}
-                                                        sx={{ color: '#22c55e' }}
+                                                        sx={{ color: '#a78bfa' }}
                                                     >
-                                                        <CheckCircleIcon />
+                                                        <MoreVertIcon />
                                                     </IconButton>
                                                 </Tooltip>
                                             ) : (
@@ -331,6 +349,23 @@ const IssuesList = ({ onIssueClick }: IssuesListProps) => {
                     </Box>
                 )}
             </Box>
+
+            {/* Status Change Menu for Gov/Admin Users */}
+            <Menu
+                anchorEl={statusMenuAnchor?.el}
+                open={Boolean(statusMenuAnchor)}
+                onClose={handleStatusMenuClose}
+                onClick={(e) => e.stopPropagation()}
+            >
+                <MenuItem onClick={() => handleStatusChange('IN_PROGRESS')}>
+                    <PlayArrowIcon sx={{ mr: 1, color: '#3b82f6' }} />
+                    Mark In Progress
+                </MenuItem>
+                <MenuItem onClick={() => handleStatusChange('RESOLVED')}>
+                    <CheckCircleIcon sx={{ mr: 1, color: '#22c55e' }} />
+                    Mark Resolved
+                </MenuItem>
+            </Menu>
         </Box>
     );
 };
