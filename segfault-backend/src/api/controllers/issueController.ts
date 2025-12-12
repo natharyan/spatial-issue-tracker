@@ -457,7 +457,7 @@ export async function updateIssueStatus(req: Request, res: Response) {
 
         const issue = await prisma.issue.findUnique({
             where: { id: issueId },
-            select: { userId: true, status: true },
+            select: { userId: true, status: true, title: true },
         });
 
         if (!issue) {
@@ -477,6 +477,15 @@ export async function updateIssueStatus(req: Request, res: Response) {
                 console.error("Failed to award points for resolution:", err)
             );
         }
+
+        // create notification for the issue reporter
+        const { createNotification } = await import("../../data/notification");
+        const { NotificationType } = await import("../../generated/prisma/enums");
+        const statusLabel = status.replace("_", " ").toLowerCase();
+        const message = `Your issue "${issue.title}" has been updated to: ${statusLabel}`;
+        createNotification(issue.userId, NotificationType.ISSUE_STATUS_UPDATE, message).catch((err) =>
+            console.error("Failed to create status update notification:", err)
+        );
 
         return res.json({
             id: String(updated.id),
