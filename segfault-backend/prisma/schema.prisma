@@ -1,98 +1,185 @@
 generator client {
-  provider = "prisma-client"
+  provider      = "prisma-client"
+  output        = "../src/generated/prisma"
   binaryTargets = ["native", "windows", "darwin-arm64"]
-  output   = "../src/generated/prisma"
 }
 
 datasource db {
-  provider  = "postgresql"
-  url  	    = env("DATABASE_URL")
-}
-
-// Primary user stuff
-enum UserRole {
-  USER
-  ADMIN
-  GUEST
-  PIGS // Government officials (.gov.in emails)
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
 }
 
 model User {
-  id        Int       @id @default(autoincrement())
-  email     String    @unique
-  emailVerified Boolean @default(false)
-  password  String
-  name      String?
-  picture   String?
-  createdAt DateTime  @default(now())
-
-  issues    Issue[]
-  comments Comment[]
-  commentUpvotes CommentUpvote[]
-  issueUpvotes IssueUpvote[]
+  id              Int                   @id @default(autoincrement())
+  email           String                @unique
+  password        String
+  name            String?
+  createdAt       DateTime              @default(now())
+  role            UserRole              @default(USER)
+  isBanned        Boolean               @default(false)
+  banExpiresAt    DateTime?
+  banReason       String?
+  credibility     Int                   @default(0)
+  picture         String?
+  emailVerified   Boolean               @default(false)
+  comments        Comment[]
+  commentUpvotes  CommentUpvote[]
+  issues          Issue[]
   resolutionVotes IssueResolutionVote[]
-
-  role     UserRole  @default(USER)
-  isBanned Boolean   @default(false)
-  banExpiresAt DateTime?
-  banReason  String?
-
-  credibility Int      @default(0)
-  badges UserBadge[]
-
-  notifications Notification[]
+  issueUpvotes    IssueUpvote[]
+  notifications   Notification[]
+  badges          UserBadge[]
 }
 
-// Would this need an image?
 model UserBadge {
   id        Int      @id @default(autoincrement())
   name      String
   awardedAt DateTime @default(now())
-
   userId    Int
   user      User     @relation(fields: [userId], references: [id])
 }
 
-// Support for guest- store this in local storage
 model GuestToken {
   id        Int      @id @default(autoincrement())
   token     String   @unique
   createdAt DateTime @default(now())
-
   issues    Issue[]
 }
 
-// Issue stuff
-
 model Issue {
-  id          Int          @id @default(autoincrement())
-  title       String
-  description String
-  location    Unsupported("geometry(Point, 4326)")?
-  status      IssueStatus  @default(PENDING)
-  authorized   IssueAuthorized @default(FALSE)
-  error       IssueError   @default(PENDING)
-  createdAt   DateTime     @default(now())
-  updatedAt   DateTime     @default(now()) @updatedAt
-  severity    Int?
-
-  imageBlobId String?
-
-  userId      Int
-  user        User         @relation(fields: [userId], references: [id])
-  comments    Comment[]
-
-  guestTokenId Int?
-  guestToken   GuestToken? @relation(fields: [guestTokenId], references: [id])
-
-  upvotes     IssueUpvote[]
+  id              Int                      @id @default(autoincrement())
+  title           String
+  description     String
+  latitude        Float
+  longitude       Float
+  status          IssueStatus              @default(PENDING)
+  authorized      IssueAuthorized          @default(FALSE)
+  error           IssueError               @default(PENDING)
+  createdAt       DateTime                 @default(now())
+  imageBlobId     String?
+  userId          Int
+  guestTokenId    Int?
+  issueType       IssueType
+  severity        Int?
+  updatedAt       DateTime                 @default(now()) @updatedAt
+  location        Unsupported("geometry")?
+  comments        Comment[]
+  guestToken      GuestToken?              @relation(fields: [guestTokenId], references: [id])
+  user            User                     @relation(fields: [userId], references: [id])
   resolutionVotes IssueResolutionVote[]
-
-  issueType  IssueType
+  upvotes         IssueUpvote[]
 
   @@index([issueType])
   @@index([userId])
-  // PostGIS GIST index is created via raw SQL migration
+  @@index([latitude, longitude])
+  @@index([location], map: "issue_location_idx", type: Gist)
+}
+
+model IssueUpvote {
+  id        Int      @id @default(autoincrement())
+  createdAt DateTime @default(now())
+  issueId   Int
+  userId    Int
+  issue     Issue    @relation(fields: [issueId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([issueId, userId])
+}
+
+model IssueResolutionVote {
+  id         Int      @id @default(autoincrement())
+  createdAt  DateTime @default(now())
+  isResolved Boolean
+  issueId    Int
+  userId     Int
+  issue      Issue    @relation(fields: [issueId], references: [id])
+  user       User     @relation(fields: [userId], references: [id])
+
+  @@unique([issueId, userId])
+}
+
+model Comment {
+  id                Int             @id @default(autoincrement())
+  content           String
+  createdAt         DateTime        @default(now())
+  issueId           Int
+  userId            Int
+  isFlagged         Boolean         @default(false)
+  flaggedReason     String?
+  isSystemGenerated Boolean         @default(false)
+  issue             Issue           @relation(fields: [issueId], references: [id])
+  user              User            @relation(fields: [userId], references: [id])
+  upvotes           CommentUpvote[]
+}
+
+model CommentUpvote {
+  id        Int      @id @default(autoincrement())
+  commentId Int
+  userId    Int
+  createdAt DateTime @default(now())
+  comment   Comment  @relation(fields: [commentId], references: [id])
+  user      User     @relation(fields: [userId], references: [id])
+
+  @@unique([commentId, userId])
+}
+
+model Notification {
+  id        Int              @id @default(autoincrement())
+  type      NotificationType @default(GENERAL)
+  message   String
+  createdAt DateTime         @default(now())
+  read      Boolean          @default(false)
+  userId    Int?
+  user      User?            @relation(fields: [userId], references: [id])
+}
+
+model GraphNode {
+  id        String                   @id @default(uuid())
+  osmId     String                   @unique
+  latitude  Float
+  longitude Float
+  location  Unsupported("geometry(Point, 4326)")?
+  incoming  GraphEdge[]              @relation("EndNode")
+  outgoing  GraphEdge[]              @relation("StartNode")
+
+  @@index([latitude, longitude])
+  @@index([location], type: Gist)
+}
+
+model GraphEdge {
+  id          String    @id @default(uuid())
+  startNodeId String
+  endNodeId   String
+  distance    Float
+  baseCost    Float
+  penalty     Float     @default(1.0)
+  endNode     GraphNode @relation("EndNode", fields: [endNodeId], references: [id])
+  startNode   GraphNode @relation("StartNode", fields: [startNodeId], references: [id])
+
+  @@index([startNodeId])
+  @@index([endNodeId])
+}
+
+model playing_with_neon {
+  id    Int    @id @default(autoincrement())
+  name  String
+  value Float? @db.Real
+}
+
+/// This table contains check constraints and requires additional setup for migrations. Visit https://pris.ly/d/check-constraints for more info.
+model spatial_ref_sys {
+  srid      Int     @id
+  auth_name String? @db.VarChar(256)
+  auth_srid Int?
+  srtext    String? @db.VarChar(2048)
+  proj4text String? @db.VarChar(2048)
+}
+
+enum UserRole {
+  USER
+  ADMIN
+  GUEST
+  PIGS
 }
 
 enum IssueStatus {
@@ -112,35 +199,6 @@ enum IssueError {
   INAPPROPRIATE_CONTENT
   PENDING
 }
-
-model IssueUpvote {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-
-  issueId   Int
-  issue     Issue    @relation(fields: [issueId], references: [id])
-
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-
-  @@unique([issueId, userId])
-}
-
-// Each vote for an issue
-model IssueResolutionVote {
-  id        Int      @id @default(autoincrement())
-  createdAt DateTime @default(now())
-  isResolved Boolean
-
-  issueId   Int
-  issue     Issue @relation(fields: [issueId], references: [id])
-
-  userId    Int
-  user      User @relation(fields: [userId], references: [id])
-
-  @@unique([issueId, userId])
-}
-
 
 enum IssueType {
   POTHOLE
@@ -163,52 +221,6 @@ enum IssueType {
   BUILDING_SAFETY
 }
 
-
-
-model Comment {
-  id        Int      @id @default(autoincrement())
-  content   String
-  createdAt DateTime @default(now())
-
-  issueId   Int
-  issue     Issue    @relation(fields: [issueId], references: [id])
-
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-
-  upvotes   CommentUpvote[]
-
-  isFlagged Boolean @default(false)
-  flaggedReason String?
-  isSystemGenerated Boolean @default(false)
-}
-
-model CommentUpvote {
-  id        Int      @id @default(autoincrement())
-
-  commentId Int
-  comment   Comment  @relation(fields: [commentId], references: [id])
-
-  userId    Int
-  user      User     @relation(fields: [userId], references: [id])
-
-  createdAt DateTime @default(now())
-
-  @@unique([commentId, userId])
-}
-
-
-model Notification {
-  id        Int      @id @default(autoincrement())
-  type      NotificationType @default(GENERAL)
-  message   String
-  createdAt DateTime @default(now())
-  read      Boolean  @default(false)
-
-  userId    Int?
-  user      User?    @relation(fields: [userId], references: [id])
-}
-
 enum NotificationType {
   ISSUE_STATUS_UPDATE
   NEW_COMMENT
@@ -216,31 +228,4 @@ enum NotificationType {
   BAN_NOTICE
   REMOVAL_NOTICE
   UPVOTE_RECEIVED
-}
-
-// Road network graph for pathfinding
-model GraphNode {
-  id        String      @id @default(uuid())
-  osmId     String      @unique // OSM node ID as string to avoid BigInt serialization issues
-  latitude  Float
-  longitude Float
-  outgoing  GraphEdge[] @relation("StartNode")
-  incoming  GraphEdge[] @relation("EndNode")
-
-  @@index([latitude, longitude])
-}
-
-model GraphEdge {
-  id          String    @id @default(uuid())
-  startNodeId String
-  endNodeId   String
-  startNode   GraphNode @relation("StartNode", fields: [startNodeId], references: [id])
-  endNode     GraphNode @relation("EndNode", fields: [endNodeId], references: [id])
-
-  distance    Float     // In meters
-  baseCost    Float     // Usually same as distance
-  penalty     Float     @default(1.0) // Multiplier: 1.0 = normal, higher = avoid
-
-  @@index([startNodeId])
-  @@index([endNodeId])
 }

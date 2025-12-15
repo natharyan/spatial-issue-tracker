@@ -47,39 +47,43 @@ function heuristic(lat1: number, lon1: number, lat2: number, lon2: number): numb
 }
 
 /**
- * Finds the nearest GraphNode to given coordinates
+ * Get bounding box for start/end points with buffer
  */
-async function findNearestNode(lat: number, lng: number): Promise<PathNode | null> {
-    // Search within a small radius first, expand if needed
-    const searchRadii = [0.001, 0.005, 0.01, 0.05];
+function getBoundingBox(startLat: number, startLng: number, endLat: number, endLng: number, bufferKM: number): [number, number, number, number] {
+    const bufferDegrees = bufferKM / 111; // Approximate degrees per km
+    const minLat = Math.min(startLat, endLat) - bufferDegrees;
+    const maxLat = Math.max(startLat, endLat) + bufferDegrees;
+    const minLng = Math.min(startLng, endLng) - bufferDegrees;
+    const maxLng = Math.max(startLng, endLng) + bufferDegrees;
+    return [minLat, minLng, maxLat, maxLng];
+}
 
-    for (const radius of searchRadii) {
-        const nodes = await prisma.graphNode.findMany({
-            where: {
-                latitude: { gte: lat - radius, lte: lat + radius },
-                longitude: { gte: lng - radius, lte: lng + radius },
-            },
-            select: { id: true, latitude: true, longitude: true },
-        });
+/**
+ * Finds the nearest GraphNode to given coordinates within a bbox
+ */
+async function findNearestNodeInBbox(lat: number, lng: number, bbox: [number, number, number, number]): Promise<PathNode | null> {
+    const nodes = await prisma.graphNode.findMany({
+        where: {
+            latitude: { gte: bbox[0], lte: bbox[2] },
+            longitude: { gte: bbox[1], lte: bbox[3] },
+        },
+        select: { id: true, latitude: true, longitude: true },
+    });
 
-        if (nodes.length > 0) {
-            // Find the closest one
-            let closest: PathNode | null = null;
-            let minDist = Infinity;
+    if (nodes.length === 0) return null;
 
-            for (const node of nodes) {
-                const dist = heuristic(lat, lng, node.latitude, node.longitude);
-                if (dist < minDist) {
-                    minDist = dist;
-                    closest = node;
-                }
-            }
+    let closest: PathNode | null = null;
+    let minDist = Infinity;
 
-            return closest;
+    for (const node of nodes) {
+        const dist = heuristic(lat, lng, node.latitude, node.longitude);
+        if (dist < minDist) {
+            minDist = dist;
+            closest = node;
         }
     }
 
-    return null;
+    return closest;
 }
 
 /**
@@ -197,45 +201,56 @@ export async function ingestOSMData(bbox: [number, number, number, number]) {
                 const endNode = nodes.get(endId);
 
                 if (startNode && endNode) {
-                    // Create/Ensure nodes exist
-                    const n1 = await prisma.graphNode.upsert({
-                        where: { osmId: startId.toString() },
-                        create: { osmId: startId.toString(), latitude: startNode.lat, longitude: startNode.lon },
-                        update: {},
-                    });
-                    const n2 = await prisma.graphNode.upsert({
-                        where: { osmId: endId.toString() },
-                        create: { osmId: endId.toString(), latitude: endNode.lat, longitude: endNode.lon },
-                        update: {},
-                    });
+                    // Upsert nodes using raw SQL to handle location
+                    const n1Id = await prisma.$queryRaw<Array<{ id: string }>>`
+                        INSERT INTO "GraphNode" ("osmId", "latitude", "longitude", "location")
+                        VALUES (${startId.toString()}, ${startNode.lat}, ${startNode.lon}, ST_SetSRID(ST_MakePoint(${startNode.lon}, ${startNode.lat}), 4326))
+                        ON CONFLICT ("osmId") DO NOTHING
+                        RETURNING "id"
+                    `;
+                    const existingN1 = await prisma.graphNode.findUnique({ where: { osmId: startId.toString() } });
+                    if (!existingN1) throw new Error(`Node ${startId} not found`);
+                    const n1 = n1Id.length > 0 && n1Id[0] ? n1Id[0].id : existingN1.id;
 
-                    // Distance
-                    const dist = turf.distance(
-                        turf.point([startNode.lon, startNode.lat]),
-                        turf.point([endNode.lon, endNode.lat]),
-                        { units: 'meters' }
-                    );
+                    const n2Id = await prisma.$queryRaw<Array<{ id: string }>>`
+                        INSERT INTO "GraphNode" ("osmId", "latitude", "longitude", "location")
+                        VALUES (${endId.toString()}, ${endNode.lat}, ${endNode.lon}, ST_SetSRID(ST_MakePoint(${endNode.lon}, ${endNode.lat}), 4326))
+                        ON CONFLICT ("osmId") DO NOTHING
+                        RETURNING "id"
+                    `;
+                    const existingN2 = await prisma.graphNode.findUnique({ where: { osmId: endId.toString() } });
+                    if (!existingN2) throw new Error(`Node ${endId} not found`);
+                    const n2 = n2Id.length > 0 && n2Id[0] ? n2Id[0].id : existingN2.id;
 
-                    // Create Edge (One way unless specified? OSM ways are generally one way if oneway=yes, but assuming bidirectional for simplicity for now or creating two edges)
-                    // Simplified: Create bidirectional for all for this prototype unless oneway tag is explicit
+                    if (n1 && n2) {
+                        // Distance
+                        const dist = turf.distance(
+                            turf.point([startNode.lon, startNode.lat]),
+                            turf.point([endNode.lon, endNode.lat]),
+                            { units: 'meters' }
+                        );
 
-                    const createEdge = async (fromId: string, toId: string) => {
-                        await prisma.graphEdge.create({
-                            data: {
-                                startNodeId: fromId,
-                                endNodeId: toId,
-                                distance: dist,
-                                baseCost: dist,
-                                penalty: basePenalty
-                            }
-                        });
-                        newEdgesCount++;
-                    };
+                        // Create Edge (One way unless specified? OSM ways are generally one way if oneway=yes, but assuming bidirectional for simplicity for now or creating two edges)
+                        // Simplified: Create bidirectional for all for this prototype unless oneway tag is explicit
 
-                    await createEdge(n1.id, n2.id);
-                    // Verify oneway
-                    if (way.tags?.oneway !== 'yes') {
-                        await createEdge(n2.id, n1.id);
+                        const createEdge = async (fromId: string, toId: string) => {
+                            await prisma.graphEdge.create({
+                                data: {
+                                    startNodeId: fromId,
+                                    endNodeId: toId,
+                                    distance: dist,
+                                    baseCost: dist,
+                                    penalty: basePenalty
+                                }
+                            });
+                            newEdgesCount++;
+                        };
+
+                        await createEdge(n1, n2);
+                        // Verify oneway
+                        if (way.tags?.oneway !== 'yes') {
+                            await createEdge(n2, n1);
+                        }
                     }
                 }
             }
@@ -260,9 +275,24 @@ export async function findPath(
 ): Promise<PathResult | null> {
     console.log(`Finding path from (${startLat}, ${startLng}) to (${endLat}, ${endLng})`);
 
-    // Step 1: Snap to nearest nodes
-    const startNode = await findNearestNode(startLat, startLng);
-    const endNode = await findNearestNode(endLat, endLng);
+    // Step 1: Compute bounding box with 2km buffer
+    const bbox = getBoundingBox(startLat, startLng, endLat, endLng, 2);
+
+    // Step 2: Check if enough nodes exist in bbox
+    const nodeCount = await prisma.$queryRaw<Array<{ count: number }>>`
+        SELECT COUNT(*) as count FROM "GraphNode"
+        WHERE ST_Within(location, ST_MakeEnvelope(${bbox[1]}, ${bbox[0]}, ${bbox[3]}, ${bbox[2]}, 4326))
+    `;
+    const count = nodeCount.length > 0 && nodeCount[0] ? Number(nodeCount[0].count) : 0;
+
+    if (count < 50) {
+        console.log(`Insufficient nodes (${count}), ingesting OSM data for bbox`);
+        await ingestOSMData(bbox);
+    }
+
+    // Step 3: Snap to nearest nodes within bbox
+    const startNode = await findNearestNodeInBbox(startLat, startLng, bbox);
+    const endNode = await findNearestNodeInBbox(endLat, endLng, bbox);
 
     if (!startNode || !endNode) {
         console.log("Could not find start or end node in graph");
@@ -271,12 +301,26 @@ export async function findPath(
 
     console.log(`Start node: ${startNode.id}, End node: ${endNode.id}`);
 
-    // Step 2: Load graph into memory and get active issues using PostGIS
+    // Step 4: Fetch nodes and edges within bbox
     const [allNodes, allEdges, activeIssues] = await Promise.all([
         prisma.graphNode.findMany({
+            where: {
+                latitude: { gte: bbox[0], lte: bbox[2] },
+                longitude: { gte: bbox[1], lte: bbox[3] },
+            },
             select: { id: true, latitude: true, longitude: true },
         }),
         prisma.graphEdge.findMany({
+            where: {
+                startNode: {
+                    latitude: { gte: bbox[0], lte: bbox[2] },
+                    longitude: { gte: bbox[1], lte: bbox[3] },
+                },
+                endNode: {
+                    latitude: { gte: bbox[0], lte: bbox[2] },
+                    longitude: { gte: bbox[1], lte: bbox[3] },
+                },
+            },
             select: { id: true, startNodeId: true, endNodeId: true, distance: true, baseCost: true, penalty: true },
         }),
         // Use PostGIS to get issue locations
@@ -305,12 +349,8 @@ export async function findPath(
     }
 
     // Apply dynamic penalties to edges
-    // For each issue, find nearby edges using PostGIS instead of manual coordinate filtering
     const issueRadius = 50; // 50 meters
-
-    // We update the 'penalty' in the edge objects in memory
     for (const issue of activeIssues) {
-        // Use PostGIS to find nodes near each issue (within 50 meters)
         const nearbyNodes = await prisma.$queryRaw<Array<{ id: string }>>`
             SELECT gn.id
             FROM "GraphNode" gn
@@ -320,20 +360,11 @@ export async function findPath(
                 ${issueRadius}
             )
         `;
-
         const nearbyNodeIds = new Set(nearbyNodes.map(n => n.id));
-
-        // Find edges connected to these nodes
         for (const edge of allEdges) {
             if (nearbyNodeIds.has(edge.startNodeId) || nearbyNodeIds.has(edge.endNodeId)) {
-                // Calculate penalty based on severity (1-5)
-                // Formula: Multiplier = 1 + (Severity * 2)
-                // Severity 1 => 3x cost
-                // Severity 3 => 7x cost  
-                // Severity 5 => 11x cost (Avoid at all costs)
                 const severity = issue.severity || 1;
                 const multiplier = 1 + (severity * 2);
-
                 edge.penalty = (edge.penalty || 1) * multiplier;
             }
         }
@@ -342,83 +373,155 @@ export async function findPath(
     // Build adjacency list
     const adjacency = buildAdjacencyList(allEdges);
 
-    // Step 3: A* Algorithm
-    const openSet = new TinyQueue<QueueItem>([{ nodeId: startNode.id, fScore: 0 }], (a, b) => a.fScore - b.fScore);
+    // Step 5: Bidirectional A*
+    const startQueue = new TinyQueue<QueueItem>([{ nodeId: startNode.id, fScore: 0 }], (a: QueueItem, b: QueueItem) => a.fScore - b.fScore);
+    const endQueue = new TinyQueue<QueueItem>([{ nodeId: endNode.id, fScore: 0 }], (a: QueueItem, b: QueueItem) => a.fScore - b.fScore);
 
-    const gScore = new Map<string, number>();
-    const cameFrom = new Map<string, string>();
-    const distanceFrom = new Map<string, number>();
+    const gScoreStart = new Map<string, number>();
+    const gScoreEnd = new Map<string, number>();
+    const cameFromStart = new Map<string, string>();
+    const cameFromEnd = new Map<string, string>();
+    const distanceFromStart = new Map<string, number>();
+    const distanceFromEnd = new Map<string, number>();
 
-    gScore.set(startNode.id, 0);
-    distanceFrom.set(startNode.id, 0);
+    gScoreStart.set(startNode.id, 0);
+    gScoreEnd.set(endNode.id, 0);
+    distanceFromStart.set(startNode.id, 0);
+    distanceFromEnd.set(endNode.id, 0);
 
-    const visited = new Set<string>();
+    const visitedStart = new Set<string>();
+    const visitedEnd = new Set<string>();
 
-    while (openSet.length > 0) {
-        const current = openSet.pop()!;
+    let meetingNode: string | null = null;
 
-        if (current.nodeId === endNode.id) {
-            // Reconstruct path
-            const path: Array<{ lat: number; lng: number }> = [];
-            let nodeId: string | undefined = endNode.id;
-            // FIX: Use ?? instead of || to handle 0 correctly
-            let totalDistance = distanceFrom.get(endNode.id) ?? 0;
-            let totalCost = gScore.get(endNode.id) ?? 0;
+    while (startQueue.length > 0 && endQueue.length > 0) {
+        // Expand the smaller queue
+        const expandStart = startQueue.length <= endQueue.length;
 
-            while (nodeId) {
-                const node = nodeMap.get(nodeId);
-                if (node) {
-                    path.unshift({ lat: node.latitude, lng: node.longitude });
-                }
-                nodeId = cameFrom.get(nodeId);
+        if (expandStart) {
+            const current = startQueue.pop()!;
+            if (visitedStart.has(current.nodeId)) continue;
+            visitedStart.add(current.nodeId);
+
+            if (visitedEnd.has(current.nodeId)) {
+                meetingNode = current.nodeId;
+                break;
             }
 
-            // Estimated time at 30 km/h average
-            const estimatedTime = (totalDistance / 1000 / 30) * 60;
+            const neighbors = adjacency.get(current.nodeId) || [];
+            for (const neighbor of neighbors) {
+                const currentG = gScoreStart.get(current.nodeId) ?? Infinity;
+                const tentativeGScore = currentG + neighbor.cost;
+                const tentativeDistance = (distanceFromStart.get(current.nodeId) ?? 0) + neighbor.distance;
+                const neighborG = gScoreStart.get(neighbor.nodeId) ?? Infinity;
 
-            console.log(`Path found! ${path.length} nodes, ${totalDistance.toFixed(0)}m, ${estimatedTime.toFixed(1)}min`);
+                if (tentativeGScore < neighborG) {
+                    cameFromStart.set(neighbor.nodeId, current.nodeId);
+                    gScoreStart.set(neighbor.nodeId, tentativeGScore);
+                    distanceFromStart.set(neighbor.nodeId, tentativeDistance);
 
-            return {
-                path,
-                totalDistance,
-                totalCost,
-                estimatedTime,
-            };
-        }
+                    const neighborNode = nodeMap.get(neighbor.nodeId);
+                    if (neighborNode) {
+                        const h = heuristic(neighborNode.latitude, neighborNode.longitude, endNode.latitude, endNode.longitude);
+                        startQueue.push({
+                            nodeId: neighbor.nodeId,
+                            fScore: tentativeGScore + h,
+                        });
+                    }
+                }
+            }
+        } else {
+            const current = endQueue.pop()!;
+            if (visitedEnd.has(current.nodeId)) continue;
+            visitedEnd.add(current.nodeId);
 
-        if (visited.has(current.nodeId)) continue;
-        visited.add(current.nodeId);
+            if (visitedStart.has(current.nodeId)) {
+                meetingNode = current.nodeId;
+                break;
+            }
 
-        const neighbors = adjacency.get(current.nodeId) || [];
+            // Reverse adjacency for end search
+            const reverseNeighbors: Array<{ nodeId: string; cost: number; distance: number }> = [];
+            for (const [fromId, edges] of adjacency) {
+                for (const edge of edges) {
+                    if (edge.nodeId === current.nodeId) {
+                        reverseNeighbors.push({ nodeId: fromId, cost: edge.cost, distance: edge.distance });
+                    }
+                }
+            }
 
-        for (const neighbor of neighbors) {
-            // FIX: Use ?? instead of || to handle gScore of 0 correctly
-            const currentG = gScore.get(current.nodeId) ?? Infinity;
-            const tentativeGScore = currentG + neighbor.cost;
-            const tentativeDistance = (distanceFrom.get(current.nodeId) ?? 0) + neighbor.distance;
+            for (const neighbor of reverseNeighbors) {
+                const currentG = gScoreEnd.get(current.nodeId) ?? Infinity;
+                const tentativeGScore = currentG + neighbor.cost;
+                const tentativeDistance = (distanceFromEnd.get(current.nodeId) ?? 0) + neighbor.distance;
+                const neighborG = gScoreEnd.get(neighbor.nodeId) ?? Infinity;
 
-            // FIX: Use ?? instead of || to handle gScore of 0 correctly
-            const neighborG = gScore.get(neighbor.nodeId) ?? Infinity;
+                if (tentativeGScore < neighborG) {
+                    cameFromEnd.set(neighbor.nodeId, current.nodeId);
+                    gScoreEnd.set(neighbor.nodeId, tentativeGScore);
+                    distanceFromEnd.set(neighbor.nodeId, tentativeDistance);
 
-            if (tentativeGScore < neighborG) {
-                cameFrom.set(neighbor.nodeId, current.nodeId);
-                gScore.set(neighbor.nodeId, tentativeGScore);
-                distanceFrom.set(neighbor.nodeId, tentativeDistance);
-
-                const neighborNode = nodeMap.get(neighbor.nodeId);
-                if (neighborNode) {
-                    const h = heuristic(neighborNode.latitude, neighborNode.longitude, endNode.latitude, endNode.longitude);
-                    openSet.push({
-                        nodeId: neighbor.nodeId,
-                        fScore: tentativeGScore + h,
-                    });
+                    const neighborNode = nodeMap.get(neighbor.nodeId);
+                    if (neighborNode) {
+                        const h = heuristic(neighborNode.latitude, neighborNode.longitude, startNode.latitude, startNode.longitude);
+                        endQueue.push({
+                            nodeId: neighbor.nodeId,
+                            fScore: tentativeGScore + h,
+                        });
+                    }
                 }
             }
         }
     }
 
-    console.log(`No path found after visiting ${visited.size} nodes`);
-    return null;
+    if (!meetingNode) {
+        console.log(`No path found`);
+        return null;
+    }
+
+    // Reconstruct path
+    const path: Array<{ lat: number; lng: number }> = [];
+    let nodeId: string | undefined = meetingNode;
+    let totalDistance = 0;
+    let totalCost = 0;
+
+    // From start to meeting
+    const startPath: string[] = [];
+    while (nodeId) {
+        startPath.unshift(nodeId);
+        nodeId = cameFromStart.get(nodeId);
+    }
+    for (const id of startPath) {
+        const node = nodeMap.get(id as string)!;
+        path.push({ lat: node.latitude, lng: node.longitude });
+    }
+
+    // From meeting to end (reverse)
+    const endPath: string[] = [];
+    nodeId = meetingNode;
+    while (nodeId) {
+        endPath.push(nodeId);
+        nodeId = cameFromEnd.get(nodeId);
+    }
+    for (let i = endPath.length - 2; i >= 0; i--) {
+        const id = endPath[i];
+        const node = nodeMap.get(id as string)!;
+        path.push({ lat: node.latitude, lng: node.longitude });
+    }
+
+    totalDistance = (distanceFromStart.get(meetingNode) ?? 0) + (distanceFromEnd.get(meetingNode) ?? 0);
+    totalCost = (gScoreStart.get(meetingNode) ?? 0) + (gScoreEnd.get(meetingNode) ?? 0);
+
+    const estimatedTime = (totalDistance / 1000 / 30) * 60;
+
+    console.log(`Path found! ${path.length} nodes, ${totalDistance.toFixed(0)}m, ${estimatedTime.toFixed(1)}min`);
+
+    return {
+        path,
+        totalDistance,
+        totalCost,
+        estimatedTime,
+    };
 }
 
 export default { findPath, ingestOSMData };
